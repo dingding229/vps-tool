@@ -18,7 +18,10 @@ show_full_status() {
     ui_section "05" "网络加速"
     show_bbr_status
 
-    ui_section "06" "文件与备份"
+    ui_section "06" "VPS Tool 更新"
+    print_update_status
+
+    ui_section "07" "文件与备份"
     ui_kv "安装日志" "$APP_LOG_FILE"
     ui_kv "备份目录" "$APP_BACKUP_DIR"
     ui_kv "配置目录" "$APP_ETC_DIR"

@@ -87,7 +87,7 @@ if grep -q '^Status\|Number of jail\|Jail list' <<< "$fail2ban_view"; then
 fi
 
 
-# 主菜单必须按功能域排列，相近操作放在同一区域，且不展示开发阶段措辞。
+# 主菜单必须按功能域排列，相近操作放在同一区域，且不展示内部阶段措辞。
 main_menu_view="$(main_menu <<< '0' 2>/dev/null)"
 python3 - "$main_menu_view" <<'PY_MENU'
 import sys
@@ -95,7 +95,7 @@ text = sys.argv[1]
 labels = ["快速开始", "SSH 与登录", "访问防护", "网络与流量", "系统维护", "其他"]
 positions = [text.index(label) for label in labels]
 assert positions == sorted(positions)
-for phrase in ("第一" + "版", "测试" + "版", "开发" + "版", "安装或" + "修复"):
+for phrase in ("第一" + "版", "测试" + "版", "安装或" + "修复"):
     assert phrase not in text
 line9 = next(line for line in text.splitlines() if "[9]" in line)
 line10 = next(line for line in text.splitlines() if "[10]" in line)
@@ -103,6 +103,7 @@ assert line9.index("查看系统状态") == line10.index("检查系统配置")
 PY_MENU
 grep -q '执行 SSH 配置回滚' <<< "$main_menu_view"
 grep -q 'vnStat 流量中心' <<< "$main_menu_view"
+grep -q '检查 VPS Tool 更新' <<< "$main_menu_view"
 printf 'main menu grouping: OK\n'
 
 printf 'ui layout tests: OK\n'

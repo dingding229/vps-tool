@@ -1,6 +1,6 @@
 # VPS Tool
 
-VPS 到手后的一键初始化脚本。当前版本 `v0.4.1`，使用 Shell 编写，提供美化交互界面。
+VPS 到手后的一键初始化脚本。当前版本 `v0.5.0`，使用 Shell 编写，提供美化交互界面。
 
 ## 交互界面
 
@@ -11,6 +11,7 @@ VPS 到手后的一键初始化脚本。当前版本 `v0.4.1`，使用 Shell 编
 - 窄终端使用紧凑的双行安全事件布局，宽终端自动切换为表格；
 - Fail2ban 状态会解析成结构化指标，不再混入原始 Status 树；
 - 所有页面、工具日志、备份名和状态时间统一显示为北京时间（`Asia/Shanghai`）。
+- 每次运行会检查 GitHub `main` 分支版本；发现新版本时自动备份旧文件、安装更新并重新进入原操作。
 
 ## 功能概览
 
@@ -35,6 +36,7 @@ VPS 到手后的一键初始化脚本。当前版本 `v0.4.1`，使用 Shell 编
 - vnStat 数据统一转换为 KiB / MiB / GiB / TiB，并以中文表格展示，不直接返回原始 JSON
 - vnStat 时间戳统一转换为北京时间，支持切换默认查询接口
 - 调用 [Actions-bbr-v3](https://github.com/byJoey/Actions-bbr-v3)
+- 启动时自动检查并安装 VPS Tool 新版本，更新失败不会阻止现有功能继续运行
 - 系统状态和最终配置检查
 
 ## 支持范围
@@ -120,8 +122,35 @@ sudo vps-tool --enable-root
 
 # 执行待处理的 SSH 回滚
 sudo vps-tool --rollback
+
+# 手动检查并安装更新
+sudo vps-tool --update
 ```
 
+
+## 自动更新
+
+脚本在受管理的安装目录（默认 `/opt/vps-tool`）启动时，会从 GitHub `main` 分支读取最新版本号：
+
+- 远程版本高于当前版本时，自动下载并检查更新包；
+- 更新前把当前目录备份为 `/opt/vps-tool.backup.北京时间`；
+- 更新完成后自动重新进入用户原本执行的功能；
+- 网络不可用、下载失败或更新包检查失败时，继续使用当前版本，不影响 SSH、Fail2ban 等功能；
+- Git 克隆的源码目录不会被自动覆盖。
+
+也可以手动执行：
+
+```bash
+sudo vps-tool --update
+```
+
+临时跳过一次自动检查：
+
+```bash
+sudo VPS_TOOL_DISABLE_AUTO_UPDATE=1 vps-tool
+```
+
+自动更新状态会记录在 `/var/lib/vps-tool/update.conf`，并显示在“系统状态总览”页面。
 
 ## vnStat 流量监控
 

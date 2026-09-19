@@ -20,7 +20,7 @@ SCRIPT_DIR="$(resolve_script_dir)" \
     || { printf '无法定位 VPS Tool 安装目录\n' >&2; exit 1; }
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/config/defaults.conf"
-for module in common preflight firewall user rollback ssh root-login logrotate fail2ban fail2ban-log vnstat bbr verify status menu; do
+for module in common update preflight firewall user rollback ssh root-login logrotate fail2ban fail2ban-log vnstat bbr verify status menu; do
     # shellcheck disable=SC1090
     source "${SCRIPT_DIR}/lib/${module}.sh"
 done
@@ -48,6 +48,7 @@ ${APP_NAME} ${APP_VERSION}
   --vnstat            进入 vnStat 流量中心
   --enable-root       启用 root SSH 登录
   --rollback          立即执行待处理 SSH 回滚
+  --update            检查并安装可用更新
   --no-clear          不清理终端画面
   --help              显示帮助
 
@@ -63,6 +64,15 @@ main() {
     require_root
     initialize_runtime
     acquire_lock
+    local requested_action="${1:---interactive}"
+    if [[ "${UPDATE_ENABLED:-yes}" == "yes" \
+        && "${VPS_TOOL_SKIP_UPDATE:-0}" != "1" \
+        && "$requested_action" != "--update" \
+        && "$requested_action" != "--rollback" ]]; then
+        auto_update_if_available "$@"
+    elif [[ -n "${VPS_TOOL_UPDATED_FROM:-}" ]]; then
+        log_success "当前运行版本：v${APP_VERSION}"
+    fi
     case "${1:---interactive}" in
         --interactive) main_menu ;;
         --all) run_all ;;
@@ -72,6 +82,7 @@ main() {
         --vnstat) vnstat_menu ;;
         --enable-root) enable_root_login_interactive ;;
         --rollback) run_ssh_rollback_now ;;
+        --update) update_now_interactive ;;
         --no-clear) export VPS_TOOL_NO_CLEAR=1; main_menu ;;
         --help|-h) usage ;;
         *) usage; return 2 ;;
