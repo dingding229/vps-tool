@@ -3,24 +3,34 @@
 BBR_STATUS="unknown"
 
 show_bbr_status() {
-    ui_title "BBR / TCP 状态"
-    printf '  %-26s %s\n' '当前内核' "$(uname -r)"
-    printf '  %-26s %s\n' '拥塞控制算法' "$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || printf 'unknown')"
-    printf '  %-26s %s\n' '默认队列算法' "$(sysctl -n net.core.default_qdisc 2>/dev/null || printf 'unknown')"
-    if [[ -d /sys/module/tcp_bbr ]]; then
-        printf '  %-26s %s\n' 'tcp_bbr 模块' '已加载'
+    local kernel congestion qdisc module_state module_version
+    kernel="$(uname -r)"
+    congestion="$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || printf 'unknown')"
+    qdisc="$(sysctl -n net.core.default_qdisc 2>/dev/null || printf 'unknown')"
+    if [[ -d /sys/module/tcp_bbr ]]; then module_state="loaded"; else module_state="missing"; fi
+    module_version="$(modinfo tcp_bbr 2>/dev/null | awk -F': ' '/^version:/ {print $2; exit}')"
+
+    ui_kv "当前内核" "$kernel"
+    ui_kv "拥塞控制算法" "$congestion"
+    ui_kv "默认队列算法" "$qdisc"
+    if [[ "$module_state" == "loaded" ]]; then
+        ui_kv "tcp_bbr 模块" "${C_GREEN}✔ 已加载${C_RESET}"
     else
-        printf '  %-26s %s\n' 'tcp_bbr 模块' '未检测到'
+        ui_kv "tcp_bbr 模块" "${C_YELLOW}▲ 未检测到${C_RESET}"
     fi
-    modinfo tcp_bbr 2>/dev/null | awk -F': ' '/^version:/ {printf "  %-26s %s\n", "BBR 模块版本", $2; found=1} END {if (!found) printf "  %-26s %s\n", "BBR 模块版本", "未知"}'
+    ui_kv "BBR 模块版本" "${module_version:-未知}"
 }
+
 
 install_bbr_interactive() {
     ui_header
     ui_title "BBRv3 内核配置"
     check_supported_os
-    printf '%s注意：BBRv3 会安装自定义内核，完成后通常需要重启。%s\n' "$C_YELLOW" "$C_RESET"
-    printf '%s上游项目：%s%s%s\n\n' "$C_DIM" "$C_CYAN" "$BBR_REPOSITORY_URL" "$C_RESET"
+    ui_section "01" "安装说明"
+    ui_kv "当前内核" "$(uname -r)"
+    ui_kv "上游项目" "${C_CYAN}${BBR_REPOSITORY_URL}${C_RESET}"
+    ui_kv "安装影响" "${C_YELLOW}安装自定义内核，完成后通常需要重启${C_RESET}"
+    printf '\n'
     confirm "下载并运行 Actions-bbr-v3 安装器" "Y" || { log_warn "已取消 BBRv3 安装"; return 0; }
 
     command_exists curl || { log_error "未找到 curl"; return 1; }

@@ -18,14 +18,29 @@ detect_fail2ban_log_source() {
 }
 
 fail2ban_log_header() {
-    printf '  %s%-19s  %-10s  %-12s  %-39s  %s%s\n' \
-        "$C_BOLD" "时间" "事件" "Jail" "IP / 对象" "说明" "$C_RESET"
-    printf '  %s' "$C_DIM"
-    repeat_char '─' 104
-    printf '%s\n' "$C_RESET"
-    printf '  %s红色：封禁、恢复封禁或异常%s  %s黄色：失败尝试/停止%s  %s绿色：解封/启动%s\n\n' \
-        "$C_RED" "$C_RESET" "$C_YELLOW" "$C_RESET" "$C_GREEN" "$C_RESET"
+    ui_update_width
+    if (( UI_WIDTH >= 100 )); then
+        local header description_width
+        description_width=$((UI_WIDTH - 75))
+        (( description_width < 20 )) && description_width=20
+        header="$(ui_columns "时间" 19 "事件" 10 "Jail" 10 "IP / 对象" 24 "说明" "$description_width")"
+        printf '  %s%s%s
+' "$C_BOLD" "$header" "$C_RESET"
+        printf '  %s' "$C_DIM"
+        repeat_char '─' "$UI_WIDTH"
+        printf '%s
+' "$C_RESET"
+    else
+        printf '  %s按时间顺序显示安全事件%s
+' "$C_BOLD" "$C_RESET"
+    fi
+    printf '  %s红色：封禁 / 恢复封禁 / 异常%s
+' "$C_RED" "$C_RESET"
+    printf '  %s黄色：失败尝试 / 服务停止%s  %s绿色：解封 / 服务启动%s
+
+'         "$C_YELLOW" "$C_RESET" "$C_GREEN" "$C_RESET"
 }
+
 
 fail2ban_clean_message() {
     local message="$1"
@@ -59,9 +74,27 @@ fail2ban_extract_message() {
 
 fail2ban_print_row() {
     local color="$1" timestamp="$2" event="$3" jail="$4" object="$5" description="$6"
-    printf '  %s%-19s  %-10s  %-12s  %-39s  %.90s%s\n' \
-        "$color" "$timestamp" "$event" "$jail" "$object" "$description" "$C_RESET"
+    local row description_width
+    ui_update_width
+    if (( UI_WIDTH >= 100 )); then
+        description_width=$((UI_WIDTH - 75))
+        (( description_width < 20 )) && description_width=20
+        row="$(ui_columns "$timestamp" 19 "$event" 10 "$jail" 10 "$object" 24 "$description" "$description_width")"
+        printf '  %s%s%s
+' "$color" "$row" "$C_RESET"
+    else
+        printf '  %s%s  [%s]  %s%s
+' "$color" "$timestamp" "$event" "$jail" "$C_RESET"
+        if [[ "$object" != "-" ]]; then
+            printf '    %s对象%s  %s%s%s
+' "$C_DIM" "$C_RESET" "$color" "$object" "$C_RESET"
+        fi
+        printf '    %s└─%s %s%s%s
+
+' "$C_DIM" "$C_RESET" "$color" "$description" "$C_RESET"
+    fi
 }
+
 
 format_fail2ban_line() {
     local line="$1" timestamp jail event object description message color
@@ -135,14 +168,14 @@ fail2ban_log_summary() {
     unbans="$(grep -cE '\[[^]]+\][[:space:]]+Unban[[:space:]]+' <<< "$raw" || true)"
     errors="$(grep -cEi 'ERROR|CRITICAL|Failed|failure|Exception|Traceback' <<< "$raw" || true)"
 
-    printf '\n  %s摘要%s  失败尝试 %s%s%s  封禁 %s%s%s  恢复封禁 %s%s%s  解封 %s%s%s  异常 %s%s%s\n' \
-        "$C_BOLD" "$C_RESET" \
-        "$C_YELLOW" "$found" "$C_RESET" \
-        "${C_BOLD}${C_RED}" "$bans" "$C_RESET" \
-        "${C_BOLD}${C_RED}" "$restored" "$C_RESET" \
-        "$C_GREEN" "$unbans" "$C_RESET" \
-        "${C_BOLD}${C_RED}" "$errors" "$C_RESET"
+    ui_subtitle "统计摘要"
+    ui_kv "失败尝试" "${C_YELLOW}${found}${C_RESET}"
+    ui_kv "新增封禁" "${C_BOLD}${C_RED}${bans}${C_RESET}"
+    ui_kv "恢复封禁" "${C_BOLD}${C_RED}${restored}${C_RESET}"
+    ui_kv "解除封禁" "${C_GREEN}${unbans}${C_RESET}"
+    ui_kv "异常事件" "${C_BOLD}${C_RED}${errors}${C_RESET}"
 }
+
 
 render_fail2ban_logs() {
     local raw="$1"
@@ -236,17 +269,23 @@ show_banned_ips() {
     jails="$(list_jails)"
     [[ -n "$jails" ]] || { log_warn "当前没有活动 jail"; return 0; }
     ui_title "当前封禁 IP"
+    local jail_index=1
     for jail in $jails; do
-        printf '%s[%s]%s\n' "$C_BOLD" "$jail" "$C_RESET"
-        local line
+        ui_section "$(printf '%02d' "$jail_index")" "Jail: ${jail}"
+        local line count=0
         line="$(fail2ban-client status "$jail" 2>/dev/null | awk -F':[[:space:]]*' '/Banned IP list/ {print $2}')"
         if [[ -n "$line" ]]; then
-            for ip in $line; do printf '  %s%s● %s%s\n' "$C_BOLD" "$C_RED" "$ip" "$C_RESET"; done
+            for ip in $line; do
+                printf '  %s%s●%s %s\n' "$C_BOLD" "$C_RED" "$C_RESET" "$ip"
+                ((count++))
+            done
+            ui_kv "封禁数量" "${C_BOLD}${C_RED}${count}${C_RESET}"
             found=1
         else
-            printf '  %s暂无封禁%s\n' "$C_DIM" "$C_RESET"
+            ui_kv "封禁数量" "${C_GREEN}0${C_RESET}"
+            ui_kv "状态" "${C_DIM}暂无封禁${C_RESET}"
         fi
-        printf '\n'
+        ((jail_index++))
     done
     (( found == 1 )) || log_success "当前没有被封禁的 IP"
 }
@@ -275,17 +314,28 @@ fail2ban_log_menu() {
     while true; do
         ui_header
         ui_title "Fail2ban 日志中心"
+
+        ui_menu_group "实时与最近日志"
         ui_menu_item 1 "最近日志" "格式化显示，默认 ${FAIL2BAN_DEFAULT_LINES} 条"
         ui_menu_item 2 "实时跟踪" "格式化显示，Ctrl+C 停止"
+
+        ui_menu_group "安全事件筛选"
         ui_menu_item 3 "封禁记录" "红色重点标记"
         ui_menu_item 4 "解封记录" "绿色标记"
-        ui_menu_item 5 "查询指定 IP"
+        ui_menu_item 5 "查询指定 IP" "查看完整攻击轨迹"
+
+        ui_menu_group "时间范围"
         ui_menu_item 6 "最近 1 小时"
         ui_menu_item 7 "最近 24 小时"
+
+        ui_menu_group "封禁管理"
         ui_menu_item 8 "当前封禁 IP"
         ui_menu_item 9 "解封 IP"
+
+        ui_menu_group "其他"
         ui_menu_item 0 "返回主菜单"
-        printf '\n'
+        printf '
+'
         choice="$(select_number '请选择' 0 9 1)" || return
         case "$choice" in
             1)

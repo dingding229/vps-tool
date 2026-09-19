@@ -52,31 +52,42 @@ check_network() {
 }
 
 show_preflight() {
+    local order="${1:-01}"
     load_os_release
-    ui_title "运行环境"
-    printf '  %-18s %s\n' '操作系统' "$OS_PRETTY"
-    printf '  %-18s %s\n' 'CPU 架构' "$OS_ARCH"
-    printf '  %-18s %s\n' '当前内核' "$(uname -r)"
-    printf '  %-18s %s\n' '虚拟化' "$(systemd-detect-virt 2>/dev/null || printf 'unknown')"
-    printf '  %-18s %s\n' '当前用户' "$(id -un)"
+    ui_section "$order" "运行环境"
+    ui_kv "操作系统" "$OS_PRETTY"
+    ui_kv "CPU 架构" "$OS_ARCH"
+    ui_kv "当前内核" "$(uname -r)"
+    ui_kv "虚拟化" "$(systemd-detect-virt 2>/dev/null || printf 'unknown')"
+    ui_kv "当前用户" "$(id -un)"
     if [[ -n "${SSH_CONNECTION:-}" ]]; then
-        printf '  %-18s %s\n' 'SSH 会话' '是'
+        ui_kv "SSH 会话" "$(ui_expect yes yes)"
     else
-        printf '  %-18s %s\n' 'SSH 会话' '否'
+        ui_kv "SSH 会话" "$(ui_expect no yes)"
     fi
 }
+
 
 run_preflight() {
     ui_header
     ui_title "环境预检查"
+
+    ui_section "01" "系统兼容性"
     check_supported_os
-    log_success "系统支持检查通过：${OS_PRETTY} (${OS_ARCH})"
+    ui_kv "检测结果" "${C_GREEN}✔ 支持${C_RESET}"
+    ui_kv "操作系统" "$OS_PRETTY"
+    ui_kv "CPU 架构" "$OS_ARCH"
+
+    ui_section "02" "网络连接"
     check_network
+
+    ui_section "03" "磁盘空间"
     local free_mb
     free_mb="$(df -Pm / | awk 'NR==2 {print $4}')"
+    ui_kv "根分区可用" "${free_mb:-未知} MiB"
     if [[ "$free_mb" =~ ^[0-9]+$ ]] && (( free_mb < 1024 )); then
         log_warn "根分区可用空间不足 1 GiB，安装 BBRv3 内核可能失败"
     else
-        log_success "磁盘空间检查通过：${free_mb:-未知} MiB 可用"
+        log_success "磁盘空间检查通过"
     fi
 }

@@ -1,16 +1,20 @@
 #!/usr/bin/env bash
 
 verify_ssh() {
-    local cfg port password pubkey
+    local cfg port password pubkey interactive service_state
     cfg="$(sshd -T 2>/dev/null || true)"
     port="$(awk '$1=="port" {print $2; exit}' <<< "$cfg")"
     password="$(awk '$1=="passwordauthentication" {print $2; exit}' <<< "$cfg")"
     pubkey="$(awk '$1=="pubkeyauthentication" {print $2; exit}' <<< "$cfg")"
-    printf '  %-28s %s\n' 'SSH 服务' "$(systemctl is-active ssh 2>/dev/null || systemctl is-active sshd 2>/dev/null || true)"
-    printf '  %-28s %s\n' 'SSH 有效端口' "${port:-unknown}"
-    printf '  %-28s %s\n' '公钥认证' "${pubkey:-unknown}"
-    printf '  %-28s %s\n' '密码认证' "${password:-unknown}"
-    [[ "$password" == no && "$pubkey" == yes ]]
+    interactive="$(awk '$1=="kbdinteractiveauthentication" {print $2; exit}' <<< "$cfg")"
+    service_state="$(systemctl is-active ssh 2>/dev/null || systemctl is-active sshd 2>/dev/null || true)"
+
+    ui_kv "SSH 服务" "$(ui_state "$service_state")"
+    ui_kv "有效端口" "${C_BOLD}${C_CYAN}${port:-unknown}${C_RESET}"
+    ui_kv "公钥认证" "$(ui_expect "${pubkey:-unknown}" yes)"
+    ui_kv "密码认证" "$(ui_expect "${password:-unknown}" no)"
+    ui_kv "交互式认证" "$(ui_expect "${interactive:-unknown}" no)"
+    [[ "$password" == no && "$pubkey" == yes && "$interactive" == no ]]
 }
 
 verify_fail2ban() {
@@ -23,22 +27,34 @@ verify_system() {
     ui_header
     ui_title "配置验证"
     local failures=0
-    printf '%sSSH%s\n' "$C_BOLD" "$C_RESET"
-    if verify_ssh; then log_success "SSH 核心安全配置通过"; else log_error "SSH 核心安全配置未通过"; ((failures++)); fi
-    printf '\n%sFail2ban%s\n' "$C_BOLD" "$C_RESET"
-    if verify_fail2ban; then
-        log_success "Fail2ban 服务和 sshd jail 正常"
-        fail2ban-client status sshd 2>/dev/null || true
+
+    ui_section "01" "SSH 安全检查"
+    if verify_ssh; then
+        log_success "SSH 核心安全配置通过"
     else
-        log_warn "Fail2ban 未安装、未运行或 sshd jail 未启用"
+        log_error "SSH 核心安全配置未通过"
+        ((failures++))
     fi
-    printf '\n%sBBR / 内核%s\n' "$C_BOLD" "$C_RESET"
+
+    ui_section "02" "Fail2ban 检查"
+    if verify_fail2ban; then
+        print_fail2ban_status
+        log_success "Fail2ban 服务和 sshd Jail 正常"
+    else
+        print_fail2ban_status || true
+        log_warn "Fail2ban 未安装、未运行或 sshd Jail 未启用"
+    fi
+
+    ui_section "03" "BBR / 内核检查"
     show_bbr_status
-    printf '\n'
+
+    ui_section "04" "回滚保护"
     if [[ -f "$SSH_ROLLBACK_STATE" ]]; then
+        ui_kv "SSH 回滚任务" "${C_YELLOW}▲ 等待确认${C_RESET}"
         log_warn "当前存在待确认的 SSH 自动回滚任务"
     else
-        log_success "没有待处理的 SSH 回滚任务"
+        ui_kv "SSH 回滚任务" "${C_GREEN}✔ 无待处理任务${C_RESET}"
     fi
+
     (( failures == 0 ))
 }

@@ -64,12 +64,15 @@ cleanup_generated_private_key() {
 
 show_generated_private_key() {
     local key_file="$1"
-    printf '\n%s%s╭────────────────── SSH 私钥（敏感信息）──────────────────╮%s\n' "$C_BOLD" "$C_RED" "$C_RESET"
-    printf '%s请将以下全部内容保存到本地文件，不要发送给任何人：%s\n\n' "$C_YELLOW" "$C_RESET"
+    ui_subtitle "SSH 私钥（敏感信息）"
+    printf '  %s请完整保存以下内容，不要发送给任何人：%s\n\n' "$C_YELLOW" "$C_RESET"
+    printf '%s' "$C_RED"
     cat "$key_file"
-    printf '\n%s╰──────────────────────────────────────────────────────────╯%s\n' "$C_RED" "$C_RESET"
-    printf '本地保存后执行：%schmod 600 ~/.ssh/vps-tool-%s%s\n' "$C_BOLD" "$TARGET_USER" "$C_RESET"
+    printf '%s\n' "$C_RESET"
+    printf '  %s本地保存后执行： chmod 600 ~/.ssh/vps-tool-%s%s\n' \
+        "$C_DIM" "$TARGET_USER" "$C_RESET"
 }
+
 
 generate_authorized_key() {
     local current_port="${1:-22}" key_name key_file group server_ip public_key old_umask
@@ -106,8 +109,9 @@ generate_authorized_key() {
     fix_authorized_keys_permissions
     log_success "已自动生成 Ed25519 密钥，并写入 authorized_keys"
 
-    printf '\n%s私钥临时保存在服务器：%s\n  %s\n' "$C_YELLOW" "$C_RESET" "$key_file"
-    printf '%s推荐在本地电脑新开终端下载：%s\n' "$C_BOLD" "$C_RESET"
+    ui_subtitle "密钥下载"
+    ui_kv "临时私钥" "$key_file"
+    printf '\n  %s推荐在本地电脑新开终端下载：%s\n' "$C_BOLD" "$C_RESET"
     printf '  %sscp -P %s %s@%s:%s ~/.ssh/vps-tool-%s%s\n' \
         "$C_CYAN" "$current_port" "$TARGET_USER" "$server_ip" "$key_file" "$TARGET_USER" "$C_RESET"
     printf '  chmod 600 ~/.ssh/vps-tool-%s\n\n' "$TARGET_USER"

@@ -12,11 +12,100 @@ else
 fi
 
 UI_WIDTH=68
+UI_LABEL_WIDTH=16
+
+ui_update_width() {
+    local columns=70
+    if command -v tput >/dev/null 2>&1 && [[ -t 1 ]]; then
+        columns="$(tput cols 2>/dev/null || printf '70')"
+    fi
+    [[ "$columns" =~ ^[0-9]+$ ]] || columns=70
+    if (( columns > 116 )); then
+        UI_WIDTH=112
+    elif (( columns >= 44 )); then
+        UI_WIDTH=$((columns - 4))
+    else
+        UI_WIDTH=40
+    fi
+}
 
 repeat_char() {
     local char="$1" count="$2" out=""
     printf -v out '%*s' "$count" ''
     printf '%s' "${out// /$char}"
+}
+
+ui_pad_right() {
+    local text="$1" width="$2"
+    if command -v python3 >/dev/null 2>&1; then
+        python3 - "$text" "$width" <<'PY_WIDTH'
+import re, sys, unicodedata
+text, width = sys.argv[1], int(sys.argv[2])
+plain = re.sub(r'\x1b\[[0-9;?]*[ -/]*[@-~]', '', text)
+def cell_width(value):
+    total = 0
+    for char in value:
+        if unicodedata.combining(char):
+            continue
+        total += 2 if unicodedata.east_asian_width(char) in ('W', 'F') else 1
+    return total
+sys.stdout.write(text + ' ' * max(0, width - cell_width(plain)))
+PY_WIDTH
+    else
+        printf '%-*s' "$width" "$text"
+    fi
+}
+
+ui_center() {
+    local text="$1" width="$2"
+    if command -v python3 >/dev/null 2>&1; then
+        python3 - "$text" "$width" <<'PY_CENTER'
+import re, sys, unicodedata
+text, width = sys.argv[1], int(sys.argv[2])
+plain = re.sub(r'\x1b\[[0-9;?]*[ -/]*[@-~]', '', text)
+def cell_width(value):
+    total = 0
+    for char in value:
+        if unicodedata.combining(char):
+            continue
+        total += 2 if unicodedata.east_asian_width(char) in ('W', 'F') else 1
+    return total
+used = cell_width(plain)
+left = max(0, (width - used) // 2)
+right = max(0, width - used - left)
+sys.stdout.write(' ' * left + text + ' ' * right)
+PY_CENTER
+    else
+        printf '%*s' "$width" "$text"
+    fi
+}
+
+ui_columns() {
+    if command -v python3 >/dev/null 2>&1; then
+        python3 - "$@" <<'PY_COLUMNS'
+import re, sys, unicodedata
+args = sys.argv[1:]
+def cell_width(value):
+    value = re.sub(r'\x1b\[[0-9;?]*[ -/]*[@-~]', '', value)
+    total = 0
+    for char in value:
+        if unicodedata.combining(char):
+            continue
+        total += 2 if unicodedata.east_asian_width(char) in ('W', 'F') else 1
+    return total
+cells = []
+for index in range(0, len(args), 2):
+    text, width = args[index], int(args[index + 1])
+    cells.append(text + ' ' * max(0, width - cell_width(text)))
+sys.stdout.write('  '.join(cells))
+PY_COLUMNS
+    else
+        while (( $# >= 2 )); do
+            printf '%-*s' "$2" "$1"
+            shift 2
+            (( $# >= 2 )) && printf '  '
+        done
+    fi
 }
 
 clear_screen() {
@@ -32,13 +121,17 @@ ui_rule() {
 }
 
 ui_header() {
+    local title tagline metadata
+    ui_update_width
     clear_screen
-    printf '\n%s%s' "$C_BOLD" "$C_CYAN"
-    printf '╭'; repeat_char '─' "$UI_WIDTH"; printf '╮\n'
-    printf '│                         V P S   T O O L                          │\n'
-    printf '╰'; repeat_char '─' "$UI_WIDTH"; printf '╯%s\n' "$C_RESET"
-    printf '  %s安全初始化 · 可验证 · 可回滚%s' "$C_BOLD" "$C_RESET"
-    printf '    %sv%s · %s%s\n\n' "$C_DIM" "$APP_VERSION" "$(date '+%Y-%m-%d %H:%M:%S')" "$C_RESET"
+    title="$(ui_center 'V P S   T O O L' "$UI_WIDTH")"
+    tagline="$(ui_center '安全初始化 · 可验证 · 可回滚' "$UI_WIDTH")"
+    metadata="$(ui_center "v${APP_VERSION}  ·  $(date '+%Y-%m-%d %H:%M:%S')" "$UI_WIDTH")"
+    printf '\n%s%s╭' "$C_BOLD" "$C_CYAN"
+    repeat_char '─' "$UI_WIDTH"
+    printf '╮\n│%s│\n│%s│\n╰' "$title" "$tagline"
+    repeat_char '─' "$UI_WIDTH"
+    printf '╯%s\n%s%s%s\n' "$C_RESET" "$C_DIM" "$metadata" "$C_RESET"
 }
 
 ui_title() {
@@ -46,12 +139,58 @@ ui_title() {
     ui_rule
 }
 
+ui_section() {
+    local order="$1" title="$2"
+    printf '\n%s%s%s%s  %s%s\n' "$C_BOLD" "$C_CYAN" "$order" "$C_RESET" "$C_BOLD" "$title$C_RESET"
+    printf '%s' "$C_DIM"
+    repeat_char '─' "$UI_WIDTH"
+    printf '%s\n' "$C_RESET"
+}
+
+ui_subtitle() {
+    printf '\n  %s%s%s%s\n' "$C_BOLD" "$C_CYAN" "$1" "$C_RESET"
+}
+
+ui_kv() {
+    local label="$1" value="$2" label_padded
+    label_padded="$(ui_pad_right "$label" "$UI_LABEL_WIDTH")"
+    printf '  %s%s%s  %s\n' "$C_DIM" "$label_padded" "$C_RESET" "$value"
+}
+
+ui_state() {
+    local state="${1:-unknown}"
+    case "$state" in
+        active|running|enabled|yes|true)
+            printf '%s● %s%s' "$C_GREEN" "$state" "$C_RESET"
+            ;;
+        inactive|disabled|no|false|failed)
+            printf '%s● %s%s' "$C_RED" "$state" "$C_RESET"
+            ;;
+        *) printf '%s● %s%s' "$C_YELLOW" "$state" "$C_RESET" ;;
+    esac
+}
+
+ui_expect() {
+    local value="${1:-unknown}" expected="$2"
+    if [[ "$value" == "$expected" ]]; then
+        printf '%s✔ %s%s' "$C_GREEN" "$value" "$C_RESET"
+    else
+        printf '%s✖ %s%s' "$C_RED" "$value" "$C_RESET"
+    fi
+}
+
+ui_menu_group() {
+    printf '\n  %s%s%s%s\n' "$C_BOLD" "$C_CYAN" "$1" "$C_RESET"
+}
+
 ui_menu_item() {
-    local key="$1" label="$2" note="${3:-}"
-    printf '  %s%s[%s]%s %-28s' "$C_BOLD" "$C_GREEN" "$key" "$C_RESET" "$label"
+    local key="$1" label="$2" note="${3:-}" label_padded
+    label_padded="$(ui_pad_right "$label" 28)"
+    printf '    %s%s[%s]%s %s' "$C_BOLD" "$C_GREEN" "$key" "$C_RESET" "$label_padded"
     [[ -n "$note" ]] && printf ' %s%s%s' "$C_DIM" "$note" "$C_RESET"
     printf '\n'
 }
+
 
 log_line() {
     local level="$1" color="$2" symbol="$3" message="$4"

@@ -74,9 +74,12 @@ configure_ssh_interactive() {
     done
     ssh_service_name
     detect_current_ssh_port
-    printf '  当前 SSH 端口：%s%s%s\n' "$C_BOLD" "$CURRENT_SSH_PORT" "$C_RESET"
+    ui_section "01" "当前连接"
+    ui_kv "SSH 服务" "$(ui_state "$(systemctl is-active "$SSH_SERVICE" 2>/dev/null || true)")"
+    ui_kv "当前端口" "${C_BOLD}${C_CYAN}${CURRENT_SSH_PORT}${C_RESET}"
 
     local target_user default_port new_port root_policy backup_dir backup_file existed=0
+    ui_subtitle "密钥认证"
     target_user="$(prompt_value '配置密钥登录的用户' "${SUDO_USER:-root}")"
     ensure_authorized_key "$target_user" "$CURRENT_SSH_PORT"
 
@@ -102,11 +105,13 @@ configure_ssh_interactive() {
         root_policy="no"
     fi
 
-    printf '\n%s即将应用：%s\n' "$C_BOLD" "$C_RESET"
-    printf '  • SSH 端口：%s → %s\n' "$CURRENT_SSH_PORT" "$NEW_SSH_PORT"
-    printf '  • 登录方式：仅公钥\n'
-    printf '  • root 策略：%s\n' "$root_policy"
-    printf '  • 自动回滚：%s 秒\n\n' "$SSH_ROLLBACK_TIMEOUT"
+    ui_section "02" "配置预览"
+    ui_kv "目标用户" "$target_user"
+    ui_kv "SSH 端口" "${CURRENT_SSH_PORT}  →  ${C_BOLD}${C_CYAN}${NEW_SSH_PORT}${C_RESET}"
+    ui_kv "登录方式" "${C_GREEN}✔ 仅允许公钥${C_RESET}"
+    ui_kv "root 策略" "$root_policy"
+    ui_kv "回滚保护" "${SSH_ROLLBACK_TIMEOUT} 秒"
+    printf '\n'
     confirm "确认继续" "Y" || { log_warn "已取消 SSH 配置"; return 0; }
 
     firewall_allow_ssh_port "$NEW_SSH_PORT" || { log_error "未确认新端口已放行，已停止"; return 1; }
@@ -138,11 +143,13 @@ configure_ssh_interactive() {
     ss -lntH | awk '{print $4}' | grep -Eq "(^|:)${NEW_SSH_PORT}$" \
         || { log_error "未检测到 SSH 监听新端口，立即回滚"; run_ssh_rollback_now; return 1; }
 
-    printf '\n%s%s╭──────────────────── 重要：连接验证 ────────────────────╮%s\n' "$C_BOLD" "$C_YELLOW" "$C_RESET"
-    printf '%s│%s 请勿关闭当前窗口。请新开终端执行：                     %s│%s\n' "$C_YELLOW" "$C_RESET" "$C_YELLOW" "$C_RESET"
-    printf '%s│%s %sssh -p %s %s@服务器IP%s%*s%s│%s\n' "$C_YELLOW" "$C_RESET" "$C_BOLD" "$NEW_SSH_PORT" "$target_user" "$C_RESET" 16 '' "$C_YELLOW" "$C_RESET"
-    printf '%s│%s 新连接成功后返回当前窗口并选择 Y。                     %s│%s\n' "$C_YELLOW" "$C_RESET" "$C_YELLOW" "$C_RESET"
-    printf '%s╰──────────────────────────────────────────────────────────╯%s\n' "$C_YELLOW" "$C_RESET"
+    ui_section "03" "连接验证"
+    ui_kv "新 SSH 端口" "${C_BOLD}${C_CYAN}${NEW_SSH_PORT}${C_RESET}"
+    ui_kv "测试用户" "$target_user"
+    printf '\n  %s请勿关闭当前窗口，请在另一终端执行：%s\n' "$C_YELLOW" "$C_RESET"
+    printf '  %sssh -p %s %s@服务器IP%s\n' "$C_BOLD" "$NEW_SSH_PORT" "$target_user" "$C_RESET"
+    printf '  %s新连接成功后返回当前窗口选择 Y；选择 N 将立即回滚。%s\n' "$C_DIM" "$C_RESET"
+
 
     if confirm "是否已使用新端口和密钥登录成功" "Y"; then
         if ! cancel_ssh_rollback "$NEW_SSH_PORT"; then
@@ -168,11 +175,18 @@ configure_ssh_interactive() {
 show_ssh_status() {
     ssh_service_name
     detect_current_ssh_port
-    printf '  %-22s %s\n' 'SSH 服务' "$(systemctl is-active "$SSH_SERVICE" 2>/dev/null || true)"
-    printf '  %-22s %s\n' '有效端口' "$CURRENT_SSH_PORT"
-    local cfg
+    local cfg service_state pubkey password interactive root_login
+    service_state="$(systemctl is-active "$SSH_SERVICE" 2>/dev/null || true)"
     cfg="$(sshd -T 2>/dev/null || true)"
-    printf '  %-22s %s\n' '公钥认证' "$(awk '$1=="pubkeyauthentication" {print $2; exit}' <<< "$cfg")"
-    printf '  %-22s %s\n' '密码认证' "$(awk '$1=="passwordauthentication" {print $2; exit}' <<< "$cfg")"
-    printf '  %-22s %s\n' '交互式认证' "$(awk '$1=="kbdinteractiveauthentication" {print $2; exit}' <<< "$cfg")"
+    pubkey="$(awk '$1=="pubkeyauthentication" {print $2; exit}' <<< "$cfg")"
+    password="$(awk '$1=="passwordauthentication" {print $2; exit}' <<< "$cfg")"
+    interactive="$(awk '$1=="kbdinteractiveauthentication" {print $2; exit}' <<< "$cfg")"
+    root_login="$(awk '$1=="permitrootlogin" {print $2; exit}' <<< "$cfg")"
+
+    ui_kv "SSH 服务" "$(ui_state "$service_state")"
+    ui_kv "有效端口" "${C_BOLD}${C_CYAN}${CURRENT_SSH_PORT}${C_RESET}"
+    ui_kv "公钥认证" "$(ui_expect "${pubkey:-unknown}" yes)"
+    ui_kv "密码认证" "$(ui_expect "${password:-unknown}" no)"
+    ui_kv "交互式认证" "$(ui_expect "${interactive:-unknown}" no)"
+    ui_kv "root 登录策略" "${root_login:-unknown}"
 }

@@ -51,6 +51,7 @@ configure_fail2ban_interactive() {
 
     local ssh_port maxretry findtime bantime max_bantime retention
     detect_current_ssh_port
+    ui_section "01" "防护参数"
     ssh_port="$(prompt_value '需要保护的 SSH 端口' "$CURRENT_SSH_PORT")"
     validate_port "$ssh_port" || { log_error "SSH 端口无效"; return 1; }
 
@@ -68,8 +69,14 @@ configure_fail2ban_interactive() {
         log_warn "请输入正整数"
     done
 
-    printf '\n  SSH 端口：%s\n  失败次数：%s\n  检测窗口：%s\n  首次封禁：%s\n  日志保留：%s 天\n\n' \
-        "$ssh_port" "$maxretry" "$findtime" "$bantime" "$retention"
+    ui_section "02" "配置预览"
+    ui_kv "SSH 端口" "$ssh_port"
+    ui_kv "最大失败次数" "$maxretry"
+    ui_kv "检测时间窗口" "$findtime"
+    ui_kv "首次封禁" "$bantime"
+    ui_kv "最长封禁" "$max_bantime"
+    ui_kv "日志保留" "${retention} 天"
+    printf '\n'
     confirm "确认安装并启用 Fail2ban" "Y" || { log_warn "已取消"; return 0; }
 
     install_fail2ban_packages || return 1
@@ -98,20 +105,49 @@ EOF_STATE
     log_success "Fail2ban 已启用，sshd jail 正常运行"
 }
 
+print_fail2ban_status() {
+    if ! command_exists fail2ban-client; then
+        ui_kv "安装状态" "${C_YELLOW}▲ 未安装${C_RESET}"
+        return 1
+    fi
+
+    local service_state enabled_state version status jail_list jail_count
+    local current_failed total_failed current_banned total_banned banned_ips
+    service_state="$(systemctl is-active fail2ban 2>/dev/null || true)"
+    enabled_state="$(systemctl is-enabled fail2ban 2>/dev/null || true)"
+    version="$(fail2ban-client version 2>/dev/null || printf 'unknown')"
+    status="$(fail2ban-client status 2>/dev/null || true)"
+    jail_list="$(awk -F':[[:space:]]*' '/Jail list/ {print $2}' <<< "$status")"
+    jail_count="$(awk -F':[[:space:]]*' '/Number of jail/ {print $2}' <<< "$status")"
+
+    ui_kv "服务状态" "$(ui_state "$service_state")"
+    ui_kv "开机启动" "$(ui_state "$enabled_state")"
+    ui_kv "版本" "$version"
+    ui_kv "活动 Jail" "${jail_count:-0}  ${C_DIM}${jail_list:-无}${C_RESET}"
+
+    if fail2ban-client status sshd >/dev/null 2>&1; then
+        status="$(fail2ban-client status sshd 2>/dev/null)"
+        current_failed="$(awk -F':[[:space:]]*' '/Currently failed/ {print $2}' <<< "$status")"
+        total_failed="$(awk -F':[[:space:]]*' '/Total failed/ {print $2}' <<< "$status")"
+        current_banned="$(awk -F':[[:space:]]*' '/Currently banned/ {print $2}' <<< "$status")"
+        total_banned="$(awk -F':[[:space:]]*' '/Total banned/ {print $2}' <<< "$status")"
+        banned_ips="$(awk -F':[[:space:]]*' '/Banned IP list/ {print $2}' <<< "$status")"
+        ui_subtitle "sshd 防护统计"
+        ui_kv "当前失败" "${C_YELLOW}${current_failed:-0}${C_RESET}"
+        ui_kv "累计失败" "${total_failed:-0}"
+        ui_kv "当前封禁" "${C_BOLD}${C_RED}${current_banned:-0}${C_RESET}"
+        ui_kv "累计封禁" "${C_RED}${total_banned:-0}${C_RESET}"
+        if [[ -n "$banned_ips" ]]; then
+            ui_kv "封禁 IP" "${C_BOLD}${C_RED}${banned_ips}${C_RESET}"
+        else
+            ui_kv "封禁 IP" "${C_DIM}暂无${C_RESET}"
+        fi
+    fi
+}
+
 show_fail2ban_status() {
     ui_header
     ui_title "Fail2ban 状态"
-    if ! command_exists fail2ban-client; then
-        log_warn "Fail2ban 尚未安装"
-        return 1
-    fi
-    printf '  %-22s %s\n' '服务状态' "$(systemctl is-active fail2ban 2>/dev/null || true)"
-    printf '  %-22s %s\n' '开机启动' "$(systemctl is-enabled fail2ban 2>/dev/null || true)"
-    printf '  %-22s %s\n' '版本' "$(fail2ban-client version 2>/dev/null || true)"
-    printf '\n'
-    fail2ban-client status 2>/dev/null || true
-    printf '\n'
-    if fail2ban-client status sshd >/dev/null 2>&1; then
-        fail2ban-client status sshd
-    fi
+    ui_section "01" "服务概览"
+    print_fail2ban_status
 }

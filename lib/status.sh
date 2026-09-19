@@ -3,22 +3,21 @@
 show_full_status() {
     ui_header
     ui_title "系统状态总览"
-    show_preflight
-    ui_title "SSH"
+
+    show_preflight "01"
+
+    ui_section "02" "SSH 安全"
     show_ssh_status
-    printf '\n'
-    ui_title "Fail2ban"
-    if command_exists fail2ban-client; then
-        printf '  %-22s %s\n' '服务状态' "$(systemctl is-active fail2ban 2>/dev/null || true)"
-        printf '  %-22s %s\n' '开机启动' "$(systemctl is-enabled fail2ban 2>/dev/null || true)"
-        printf '  %-22s %s\n' '版本' "$(fail2ban-client version 2>/dev/null || true)"
-        fail2ban-client status 2>/dev/null || true
-    else
-        log_warn "Fail2ban：未安装"
-    fi
-    printf '\n'
+
+    ui_section "03" "Fail2ban 防护"
+    print_fail2ban_status || true
+
+    ui_section "04" "网络加速"
     show_bbr_status
-    printf '\n'
-    printf '  %-22s %s\n' '安装日志' "$APP_LOG_FILE"
-    printf '  %-22s %s\n' '备份目录' "$APP_BACKUP_DIR"
+
+    ui_section "05" "文件与备份"
+    ui_kv "安装日志" "$APP_LOG_FILE"
+    ui_kv "备份目录" "$APP_BACKUP_DIR"
+    ui_kv "配置目录" "$APP_ETC_DIR"
+    ui_kv "状态目录" "$APP_STATE_DIR"
 }
