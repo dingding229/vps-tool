@@ -43,7 +43,7 @@ printf 'old\n' > "${fake_install}/old-marker"
 printf '#!/usr/bin/env bash\n' > "${fake_install}/vps-init.sh"
 printf '#!/usr/bin/env bash\necho new\n' > "${payload}/vps-init.sh"
 printf '#!/usr/bin/env bash\n' > "${payload}/install.sh"
-printf 'APP_VERSION="0.5.1"\n' > "${payload}/config/defaults.conf"
+printf 'APP_VERSION="0.5.2"\n' > "${payload}/config/defaults.conf"
 printf '#!/usr/bin/env bash\n' > "${payload}/lib/common.sh"
 printf '#!/usr/bin/env bash\n' > "${payload}/lib/update.sh"
 printf '#!/usr/bin/env bash\n' > "${payload}/scripts/status.sh"
@@ -68,19 +68,55 @@ curl() {
     if [[ -n "$output" ]]; then
         cp "$MOCK_ARCHIVE" "$output"
     else
-        printf 'APP_VERSION="0.5.1"\n'
+        printf 'APP_VERSION="0.5.2"\n'
     fi
 }
 
-[[ "$(read_remote_app_version)" == '0.5.1' ]]
+[[ "$(read_remote_app_version)" == '0.5.2' ]]
 check_result=0
 check_for_updates auto || check_result=$?
 [[ "$check_result" == "10" ]]
-[[ "$UPDATE_AVAILABLE_VERSION" == "0.5.1" ]]
+[[ "$UPDATE_AVAILABLE_VERSION" == "0.5.2" ]]
 grep -q '^STATUS=available$' "$UPDATE_STATE_FILE"
-install_remote_update '0.5.1'
-grep -q 'APP_VERSION="0.5.1"' "${fake_install}/config/defaults.conf"
+install_remote_update '0.5.2'
+grep -q 'APP_VERSION="0.5.2"' "${fake_install}/config/defaults.conf"
 [[ -x "${fake_install}/vps-init.sh" ]]
-[[ -n "$(find "$temp_dir" -maxdepth 1 -type d -name 'vps-tool.backup.*' -print -quit)" ]]
+[[ ! -e "${fake_install}/old-marker" ]]
+[[ -z "$(find "$temp_dir" -maxdepth 2 -type d \( -name 'vps-tool.backup.*' -o -name 'previous' -o -name 'previous-install' \) -print -quit)" ]]
 grep -q '^STATUS=updated$' "$UPDATE_STATE_FILE"
-printf 'atomic update installation: OK\n'
+grep -q '^CURRENT_VERSION=0.5.2$' "$UPDATE_STATE_FILE"
+printf 'atomic update without retained backup: OK\n'
+
+if grep -q 'backup_dir=' install.sh lib/update.sh; then
+    printf 'FAIL: update path still creates persistent backup directories\n'
+    exit 1
+fi
+printf 'installer replacement without retained backup: OK\n'
+
+
+# 目录切换中断时只使用临时恢复目录，恢复完成后不保留副本。
+restore_target="${temp_dir}/restore-target"
+restore_temp="${temp_dir}/restore-transaction"
+restore_previous="${restore_temp}/previous"
+mkdir -p "$restore_previous"
+printf 'restore-me\n' > "${restore_previous}/marker"
+UPDATE_TRANSACTION_TEMP="$restore_temp"
+UPDATE_TRANSACTION_PREVIOUS="$restore_previous"
+UPDATE_TRANSACTION_TARGET="$restore_target"
+cleanup_update_transaction
+[[ -f "${restore_target}/marker" ]]
+[[ ! -e "$restore_temp" ]]
+printf 'interrupted update restoration: OK\n'
+
+
+# 从旧更新逻辑升级后，自动清理由旧版本遗留的目录。
+legacy_install="${temp_dir}/legacy-tool"
+legacy_backup="${legacy_install}.backup.20260920-010000"
+mkdir -p "$legacy_install" "$legacy_backup"
+printf '#!/usr/bin/env bash\n' > "${legacy_install}/vps-init.sh"
+SCRIPT_DIR="$legacy_install"
+VPS_TOOL_UPDATED_FROM="0.5.0"
+cleanup_retained_update_directories
+[[ ! -e "$legacy_backup" ]]
+unset VPS_TOOL_UPDATED_FROM
+printf 'legacy update directory cleanup: OK\n'

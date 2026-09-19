@@ -2,6 +2,9 @@
 
 UPDATE_STATE_FILE="${UPDATE_STATE_FILE:-${APP_STATE_DIR}/update.conf}"
 UPDATE_AVAILABLE_VERSION=""
+UPDATE_TRANSACTION_TEMP=""
+UPDATE_TRANSACTION_PREVIOUS=""
+UPDATE_TRANSACTION_TARGET=""
 
 normalize_app_version() {
     local version="${1#v}"
@@ -62,12 +65,41 @@ is_managed_installation() {
     [[ ! -d "${SCRIPT_DIR}/.git" ]]
 }
 
+
+cleanup_update_transaction() {
+    if [[ -n "${UPDATE_TRANSACTION_PREVIOUS:-}" && -d "${UPDATE_TRANSACTION_PREVIOUS:-}" ]]; then
+        if [[ -n "${UPDATE_TRANSACTION_TARGET:-}" && ! -d "${UPDATE_TRANSACTION_TARGET:-}" ]]; then
+            mv "$UPDATE_TRANSACTION_PREVIOUS" "$UPDATE_TRANSACTION_TARGET" 2>/dev/null || true
+        else
+            rm -rf "$UPDATE_TRANSACTION_PREVIOUS"
+        fi
+    fi
+    if [[ -n "${UPDATE_TRANSACTION_TEMP:-}" && -d "${UPDATE_TRANSACTION_TEMP:-}" ]]; then
+        rm -rf "$UPDATE_TRANSACTION_TEMP"
+    fi
+    UPDATE_TRANSACTION_TEMP=""
+    UPDATE_TRANSACTION_PREVIOUS=""
+    UPDATE_TRANSACTION_TARGET=""
+}
+
+cleanup_retained_update_directories() {
+    local parent base
+    [[ -n "${VPS_TOOL_UPDATED_FROM:-}" ]] || return 0
+    is_managed_installation || return 0
+    parent="$(dirname "$SCRIPT_DIR")"
+    base="$(basename "$SCRIPT_DIR")"
+    find "$parent" -mindepth 1 -maxdepth 1 -type d -name "${base}.backup.*" \
+        -exec rm -rf -- {} + 2>/dev/null || true
+}
+
 install_remote_update() {
-    local latest="$1" parent base temp_dir archive source_dir backup_dir archive_version
+    local latest="$1" parent base temp_dir archive source_dir previous_dir archive_version
     parent="$(dirname "$SCRIPT_DIR")"
     base="$(basename "$SCRIPT_DIR")"
     temp_dir="$(mktemp -d "${parent}/.${base}-update.XXXXXX")" \
         || { log_warn "无法创建更新目录，继续使用当前版本"; return 1; }
+    UPDATE_TRANSACTION_TEMP="$temp_dir"
+    UPDATE_TRANSACTION_TARGET="$SCRIPT_DIR"
     archive="${temp_dir}/source.tar.gz"
 
     if ! curl --fail --silent --show-error --location \
@@ -112,25 +144,34 @@ install_remote_update() {
 
     chmod 700 "${source_dir}/vps-init.sh" "${source_dir}/install.sh"
     find "${source_dir}/scripts" -type f -name '*.sh' -exec chmod 700 {} +
-    backup_dir="${SCRIPT_DIR}.backup.$(beijing_compact)"
-    [[ ! -e "$backup_dir" ]] || backup_dir="${backup_dir}.$$"
-
-    if ! mv "$SCRIPT_DIR" "$backup_dir"; then
-        log_warn "当前程序无法备份，继续使用当前版本"
+    previous_dir="${temp_dir}/previous"
+    UPDATE_TRANSACTION_PREVIOUS="$previous_dir"
+    if ! mv "$SCRIPT_DIR" "$previous_dir"; then
+        log_warn "当前程序无法替换，继续使用当前版本"
         rm -rf "$temp_dir"
         return 1
     fi
     if ! mv "$source_dir" "$SCRIPT_DIR"; then
-        mv "$backup_dir" "$SCRIPT_DIR" 2>/dev/null || true
-        log_error "更新安装失败，已恢复当前版本"
-        rm -rf "$temp_dir"
+        [[ ! -e "$SCRIPT_DIR" ]] || rm -rf "$SCRIPT_DIR"
+        if mv "$previous_dir" "$SCRIPT_DIR" 2>/dev/null; then
+            UPDATE_TRANSACTION_PREVIOUS=""
+            rm -rf "$temp_dir"
+            UPDATE_TRANSACTION_TEMP=""
+            UPDATE_TRANSACTION_TARGET=""
+            log_error "更新安装失败，已恢复当前版本"
+        else
+            log_error "更新安装失败，当前版本暂存于 ${previous_dir}"
+        fi
         return 1
     fi
-    rm -rf "$temp_dir"
 
+    # 旧程序仅在目录切换期间用于失败恢复，更新成功后立即删除，不保留备份。
+    rm -rf "$previous_dir" "$temp_dir"
+    UPDATE_TRANSACTION_TEMP=""
+    UPDATE_TRANSACTION_PREVIOUS=""
+    UPDATE_TRANSACTION_TARGET=""
     write_update_state "updated" "$latest" "自动更新完成" "$latest"
     log_success "VPS Tool 已从 v${APP_VERSION} 更新到 v${latest}"
-    log_info "旧版本已备份到 ${backup_dir}"
     return 0
 }
 

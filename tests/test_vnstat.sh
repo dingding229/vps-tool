@@ -67,8 +67,17 @@ grep -q '512.00 KiB' <<< "$hourly"
 grep -q '1.50 MiB' <<< "$hourly"
 printf 'vnStat hourly Beijing table: OK\n'
 
-today="$(render_vnstat_json today eth0 <<< "$sample_json")"
-grep -q '2026-09-19' <<< "$today"
+read -r today_date today_timestamp < <(python3 - "${APP_TIMEZONE:-Asia/Shanghai}" <<'PY_TODAY'
+import datetime as dt, sys
+from zoneinfo import ZoneInfo
+now = dt.datetime.now(ZoneInfo(sys.argv[1]))
+midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+print(now.strftime("%Y-%m-%d"), int(midnight.timestamp()))
+PY_TODAY
+)
+today_json="$(printf '{"interfaces":[{"name":"eth0","traffic":{"day":[{"timestamp":%s,"rx":1073741824,"tx":536870912}]}}]}' "$today_timestamp")"
+today="$(render_vnstat_json today eth0 <<< "$today_json")"
+grep -q "$today_date" <<< "$today"
 grep -q '1.50 GiB' <<< "$today"
 printf 'vnStat today table: OK\n'
 

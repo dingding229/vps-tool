@@ -27,6 +27,7 @@ done
 
 # 自动生成的私钥仅在用户完成下载和登录确认前临时保留；未完成的 root 配置自动恢复。
 cleanup_vps_tool_session() {
+    cleanup_update_transaction
     cleanup_pending_root_login
     cleanup_generated_private_key
 }
@@ -64,6 +65,7 @@ main() {
     require_root
     initialize_runtime
     acquire_lock
+    cleanup_retained_update_directories
     local requested_action="${1:---interactive}"
     if [[ "${UPDATE_ENABLED:-yes}" == "yes" \
         && "${VPS_TOOL_SKIP_UPDATE:-0}" != "1" \
