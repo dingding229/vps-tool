@@ -10,7 +10,8 @@ VPS 到手后的一键初始化脚本（第一版）。使用 Shell 编写，提
 - 自动检测并放行 UFW / firewalld 端口
 - SSH 配置语法验证和临时自动回滚，降低锁死风险
 - 安装和配置 Fail2ban
-- 从脚本查看 Fail2ban 最近日志、实时日志、Ban/Unban、IP 查询
+- 从脚本查看格式化的 Fail2ban 最近日志、实时日志、Ban/Unban、IP 查询
+- Fail2ban 日志按事件、Jail 和 IP 分栏显示，封禁/恢复封禁/异常使用红色重点标记
 - 查看当前 Jail 和封禁 IP
 - 从脚本解封 IP
 - 配置 Fail2ban 和工具自身的 logrotate 清理策略

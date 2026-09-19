@@ -94,3 +94,23 @@ rm -rf "$temp_home"
 TARGET_USER="$original_user"
 TARGET_HOME="$original_home"
 printf 'cancelled key flow: OK\n'
+
+# Fail2ban 日志必须结构化显示，不能直接回显原始组件行。
+sample_logs="$(cat <<'LOGS'
+2026-09-19 04:40:43,676 fail2ban.filter [471]: INFO [sshd] Found 124.161.224.81 - 2026-09-19 04:40:43
+2026-09-19 04:48:23,200 fail2ban.actions [51929]: NOTICE [sshd] Restore Ban 125.122.39.115
+2026-09-19 04:49:00,000 fail2ban.actions [51929]: NOTICE [sshd] Ban 203.0.113.10
+2026-09-19 04:49:01,000 fail2ban.server [51929]: ERROR Something failed badly
+LOGS
+)"
+formatted_logs="$(render_fail2ban_logs "$sample_logs")"
+grep -q '失败尝试' <<< "$formatted_logs"
+grep -q '恢复封禁' <<< "$formatted_logs"
+grep -q '封禁' <<< "$formatted_logs"
+grep -q '异常' <<< "$formatted_logs"
+grep -q '摘要' <<< "$formatted_logs"
+if grep -q 'fail2ban.actions' <<< "$formatted_logs"; then
+    printf 'FAIL: raw Fail2ban log component leaked into formatted output\n'
+    exit 1
+fi
+printf 'formatted fail2ban logs: OK\n'
