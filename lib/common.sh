@@ -211,7 +211,7 @@ ui_header() {
     ui_update_width
     clear_screen
     title="$(ui_center 'V P S   T O O L' "$UI_WIDTH")"
-    tagline="$(ui_center '安全初始化 · 可验证 · 可回滚' "$UI_WIDTH")"
+    tagline="$(ui_center '安全配置 · 状态监控 · 自动回滚' "$UI_WIDTH")"
     metadata="$(ui_center "v${APP_VERSION}  ·  $(beijing_now)  ${APP_TIMEZONE_LABEL:-北京时间}" "$UI_WIDTH")"
     printf '\n%s%s╭' "$C_BOLD" "$C_CYAN"
     repeat_char '─' "$UI_WIDTH"
@@ -270,9 +270,10 @@ ui_menu_group() {
 }
 
 ui_menu_item() {
-    local key="$1" label="$2" note="${3:-}" label_padded
+    local key="$1" label="$2" note="${3:-}" key_padded label_padded
+    key_padded="$(ui_pad_right "[${key}]" 5)"
     label_padded="$(ui_pad_right "$label" 28)"
-    printf '    %s%s[%s]%s %s' "$C_BOLD" "$C_GREEN" "$key" "$C_RESET" "$label_padded"
+    printf '    %s%s%s%s%s' "$C_BOLD" "$C_GREEN" "$key_padded" "$C_RESET" "$label_padded"
     [[ -n "$note" ]] && printf ' %s%s%s' "$C_DIM" "$note" "$C_RESET"
     printf '\n'
 }

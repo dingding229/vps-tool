@@ -25,7 +25,7 @@ for module in common preflight firewall user rollback ssh root-login logrotate f
     source "${SCRIPT_DIR}/lib/${module}.sh"
 done
 
-# 自动生成的私钥仅在用户完成下载和测试前临时保留；未完成的 root 配置自动恢复。
+# 自动生成的私钥仅在用户完成下载和登录确认前临时保留；未完成的 root 配置自动恢复。
 cleanup_vps_tool_session() {
     cleanup_pending_root_login
     cleanup_generated_private_key
@@ -43,7 +43,7 @@ ${APP_NAME} ${APP_VERSION}
   --interactive       进入交互模式（默认）
   --all               执行完整配置流程
   --status            查看系统状态
-  --verify            验证配置
+  --verify            检查系统配置
   --fail2ban-logs     进入 Fail2ban 日志中心
   --vnstat            进入 vnStat 流量中心
   --enable-root       启用 root SSH 登录

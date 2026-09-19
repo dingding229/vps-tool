@@ -358,7 +358,7 @@ enable_root_login_interactive() {
     if [[ -n "$access_controls" ]]; then
         ui_kv "访问控制规则" "$access_controls"
         log_warn "AllowUsers / DenyUsers / AllowGroups / DenyGroups 可能继续限制 root 登录"
-        confirm "是否继续配置并通过实际登录验证" "Y" || { log_warn "已取消"; return 0; }
+        confirm "是否继续配置并通过实际登录确认" "Y" || { log_warn "已取消"; return 0; }
     fi
 
     backup_dir="$(create_backup_dir)"
@@ -422,7 +422,7 @@ enable_root_login_interactive() {
         return 1
     }
     if ! verify_root_access_config "$ROOT_ACCESS_MODE"; then
-        log_error "root SSH 配置验证失败，正在恢复原配置"
+        log_error "root SSH 配置检查失败，正在恢复原配置"
         rollback_root_login_transaction
         return 1
     fi
@@ -432,7 +432,7 @@ enable_root_login_interactive() {
         return 1
     fi
 
-    ui_section "04" "登录验证"
+    ui_section "04" "登录确认"
     printf '  %s请保持当前窗口，在另一终端执行：%s\n' "$C_YELLOW" "$C_RESET"
     printf '  %sssh -p %s root@服务器IP%s\n' "$C_BOLD" "$CURRENT_SSH_PORT" "$C_RESET"
     printf '  %s登录成功后选择 Y；选择 N 会恢复 SSH 配置、root 密码状态、Shell 和公钥文件。%s\n' \

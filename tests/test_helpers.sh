@@ -127,3 +127,15 @@ offset_log='2026-09-19T04:40:12+00:00 host fail2ban.actions [1]: NOTICE [sshd] B
 offset_view="$(render_fail2ban_logs "$offset_log")"
 grep -q '2026-09-19 12:40:12' <<< "$offset_view"
 printf 'Fail2ban Beijing timestamp: OK\n'
+
+# Fail2ban 菜单按“日志查看 → 事件查询 → 封禁管理”排列。
+fail2ban_menu_view="$(fail2ban_log_menu <<< '0' 2>/dev/null)"
+python3 - "$fail2ban_menu_view" <<'PY_F2B_MENU'
+import sys
+text = sys.argv[1]
+labels = ["日志查看", "事件查询", "封禁管理", "其他"]
+positions = [text.index(label) for label in labels]
+assert positions == sorted(positions)
+assert text.index("最近 1 小时") < text.index("封禁记录")
+PY_F2B_MENU
+printf 'Fail2ban menu grouping: OK\n'

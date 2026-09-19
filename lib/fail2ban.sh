@@ -84,7 +84,7 @@ configure_fail2ban_interactive() {
     configure_logrotate "$retention" || return 1
 
     if ! fail2ban-client -t >> "$APP_LOG_FILE" 2>&1; then
-        log_error "Fail2ban 配置验证失败，详情见 ${APP_LOG_FILE}"
+        log_error "Fail2ban 配置检查失败，详情见 ${APP_LOG_FILE}"
         return 1
     fi
     systemctl enable --now fail2ban >> "$APP_LOG_FILE" 2>&1

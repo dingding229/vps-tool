@@ -180,10 +180,10 @@ configure_ssh_interactive() {
     ui_kv "登录方式" "${C_GREEN}✔ 仅允许公钥${C_RESET}"
     ui_kv "root 策略" "$root_policy"
     if (( skip_connection_test == 1 )); then
-        ui_kv "连接验证" "${C_GREEN}自动跳过（当前已为仅密钥登录）${C_RESET}"
+        ui_kv "连接确认" "${C_GREEN}自动跳过（当前已为仅密钥登录）${C_RESET}"
         ui_kv "回滚保护" "${C_DIM}无需定时回滚${C_RESET}"
     else
-        ui_kv "连接验证" "${C_YELLOW}需要新终端测试${C_RESET}"
+        ui_kv "连接确认" "${C_YELLOW}需要在新终端确认${C_RESET}"
         ui_kv "回滚保护" "${SSH_ROLLBACK_TIMEOUT} 秒"
     fi
     printf '\n'
@@ -205,12 +205,12 @@ configure_ssh_interactive() {
 
     write_ssh_dropin "$NEW_SSH_PORT" "$root_policy" "$write_port"
     if ! verify_effective_ssh_config "$NEW_SSH_PORT" "$target_user"; then
-        log_error "SSH 配置验证失败，正在恢复"
+        log_error "SSH 配置检查失败，正在恢复"
         [[ "$existed" == "1" ]] && cp -a "$backup_file" "$SSH_DROPIN_FILE" || rm -f "$SSH_DROPIN_FILE"
         (( port_changed == 1 )) && firewall_remove_ssh_port "$NEW_SSH_PORT"
         return 1
     fi
-    log_success "sshd 配置语法和有效参数验证通过"
+    log_success "sshd 配置语法和有效参数检查通过"
 
     if (( skip_connection_test == 1 )); then
         if ! systemctl reload "$SSH_SERVICE"; then
@@ -229,7 +229,7 @@ configure_ssh_interactive() {
         printf 'SSH_PORT=%q\nSSH_USER=%q\nUPDATED_AT=%q\n' \
             "$NEW_SSH_PORT" "$target_user" "$(beijing_iso)" > "${APP_STATE_DIR}/ssh.conf"
         chmod 600 "${APP_STATE_DIR}/ssh.conf"
-        log_success "当前端口未变化且仅密钥登录已生效，已跳过重复连接测试"
+        log_success "当前端口未变化且仅密钥登录已生效，已跳过重复连接确认"
         log_success "SSH 安全配置已完成"
         return 0
     fi
@@ -245,9 +245,9 @@ configure_ssh_interactive() {
     ss -lntH | awk '{print $4}' | grep -Eq "(^|:)${NEW_SSH_PORT}$" \
         || { log_error "未检测到 SSH 监听新端口，立即回滚"; run_ssh_rollback_now; return 1; }
 
-    ui_section "03" "连接验证"
+    ui_section "03" "连接确认"
     ui_kv "新 SSH 端口" "${C_BOLD}${C_CYAN}${NEW_SSH_PORT}${C_RESET}"
-    ui_kv "测试用户" "$target_user"
+    ui_kv "登录用户" "$target_user"
     printf '\n  %s请勿关闭当前窗口，请在另一终端执行：%s\n' "$C_YELLOW" "$C_RESET"
     printf '  %sssh -p %s %s@服务器IP%s\n' "$C_BOLD" "$NEW_SSH_PORT" "$target_user" "$C_RESET"
     printf '  %s新连接成功后返回当前窗口选择 Y；选择 N 将立即回滚。%s\n' "$C_DIM" "$C_RESET"

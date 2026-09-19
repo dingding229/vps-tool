@@ -20,7 +20,7 @@ check_supported_os() {
     case "$OS_ID" in
         debian)
             [[ "${OS_VERSION%%.*}" =~ ^[0-9]+$ ]] && (( ${OS_VERSION%%.*} >= 12 )) \
-                || die "第一版仅支持 Debian 12 及以上版本，当前：${OS_PRETTY}"
+                || die "仅支持 Debian 12 及以上版本，当前：${OS_PRETTY}"
             ;;
         ubuntu)
             local major minor
@@ -29,9 +29,9 @@ check_supported_os() {
             [[ "$major" =~ ^[0-9]+$ && "$minor" =~ ^[0-9]+$ ]] \
                 || die "无法识别 Ubuntu 版本：${OS_PRETTY}"
             (( major > 24 || (major == 24 && minor >= 4) )) \
-                || die "第一版仅支持 Ubuntu 24.04 及以上版本，当前：${OS_PRETTY}"
+                || die "仅支持 Ubuntu 24.04 及以上版本，当前：${OS_PRETTY}"
             ;;
-        *) die "第一版仅支持 Debian 12+ 和 Ubuntu 24.04+，当前：${OS_PRETTY}" ;;
+        *) die "仅支持 Debian 12+ 和 Ubuntu 24.04+，当前：${OS_PRETTY}" ;;
     esac
 
     case "$OS_ARCH" in
@@ -71,7 +71,7 @@ show_preflight() {
 
 run_preflight() {
     ui_header
-    ui_title "环境预检查"
+    ui_title "运行环境检查"
 
     ui_section "01" "系统兼容性"
     check_supported_os

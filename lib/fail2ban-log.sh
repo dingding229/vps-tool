@@ -318,18 +318,16 @@ fail2ban_log_menu() {
         ui_header
         ui_title "Fail2ban 日志中心"
 
-        ui_menu_group "实时与最近日志"
+        ui_menu_group "日志查看"
         ui_menu_item 1 "最近日志" "格式化显示，默认 ${FAIL2BAN_DEFAULT_LINES} 条"
         ui_menu_item 2 "实时跟踪" "格式化显示，Ctrl+C 停止"
+        ui_menu_item 3 "最近 1 小时" "按时间范围查看"
+        ui_menu_item 4 "最近 24 小时" "按时间范围查看"
 
-        ui_menu_group "安全事件筛选"
-        ui_menu_item 3 "封禁记录" "红色重点标记"
-        ui_menu_item 4 "解封记录" "绿色标记"
-        ui_menu_item 5 "查询指定 IP" "查看完整攻击轨迹"
-
-        ui_menu_group "时间范围"
-        ui_menu_item 6 "最近 1 小时"
-        ui_menu_item 7 "最近 24 小时"
+        ui_menu_group "事件查询"
+        ui_menu_item 5 "封禁记录" "红色重点标记"
+        ui_menu_item 6 "解封记录" "绿色标记"
+        ui_menu_item 7 "查询指定 IP" "查看完整安全事件"
 
         ui_menu_group "封禁管理"
         ui_menu_item 8 "当前封禁 IP"
@@ -351,14 +349,14 @@ fail2ban_log_menu() {
                 trap - INT
                 pause_screen
                 ;;
-            3) ui_header; ui_title "最近封禁记录"; filter_fail2ban_logs 'Ban'; pause_screen ;;
-            4) ui_header; ui_title "最近解封记录"; filter_fail2ban_logs 'Unban'; pause_screen ;;
-            5)
+            3) ui_header; show_logs_since '1 hour ago'; pause_screen ;;
+            4) ui_header; show_logs_since '24 hours ago'; pause_screen ;;
+            5) ui_header; ui_title "最近封禁记录"; filter_fail2ban_logs 'Ban'; pause_screen ;;
+            6) ui_header; ui_title "最近解封记录"; filter_fail2ban_logs 'Unban'; pause_screen ;;
+            7)
                 ip="$(prompt_value 'IP 地址' '')"
                 ui_header; search_fail2ban_ip "$ip"; pause_screen
                 ;;
-            6) ui_header; show_logs_since '1 hour ago'; pause_screen ;;
-            7) ui_header; show_logs_since '24 hours ago'; pause_screen ;;
             8) ui_header; show_banned_ips; pause_screen ;;
             9) ui_header; ui_title "解封 IP"; unban_ip_interactive; pause_screen ;;
             0) return ;;

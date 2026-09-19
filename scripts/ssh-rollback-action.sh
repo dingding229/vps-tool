@@ -21,7 +21,7 @@ fi
 if /usr/sbin/sshd -t >> "$LOG_FILE" 2>&1; then
     systemctl reload "$SSH_SERVICE" >> "$LOG_FILE" 2>&1
 else
-    printf '[%s] [ROLLBACK] 恢复后的 SSH 配置验证失败\n' "$(beijing_now)" >> "$LOG_FILE"
+    printf '[%s] [ROLLBACK] 恢复后的 SSH 配置检查失败\n' "$(beijing_now)" >> "$LOG_FILE"
     exit 1
 fi
 case "$FIREWALL_KIND" in

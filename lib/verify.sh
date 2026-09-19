@@ -16,13 +16,13 @@ verify_ssh() {
     ui_kv "交互式认证" "$(ui_expect "${interactive:-unknown}" no)"
     if [[ -r "${APP_STATE_DIR}/root-login.conf" ]]; then
         if verify_root_login; then
-            ui_kv "root 登录验证" "${C_GREEN}✔ 专用策略正常${C_RESET}"
+            ui_kv "root 登录检查" "${C_GREEN}✔ 专用策略正常${C_RESET}"
         else
-            ui_kv "root 登录验证" "${C_RED}✖ 专用策略异常${C_RESET}"
+            ui_kv "root 登录检查" "${C_RED}✖ 专用策略异常${C_RESET}"
             return 1
         fi
     else
-        ui_kv "root 登录验证" "${C_DIM}未由工具启用${C_RESET}"
+        ui_kv "root 登录检查" "${C_DIM}未由工具启用${C_RESET}"
     fi
     [[ "$password" == no && "$pubkey" == yes && "$interactive" == no ]]
 }
@@ -43,7 +43,7 @@ verify_fail2ban() {
 
 verify_system() {
     ui_header
-    ui_title "配置验证"
+    ui_title "系统配置检查"
     local failures=0
 
     ui_section "01" "SSH 安全检查"

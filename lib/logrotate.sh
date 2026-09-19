@@ -37,9 +37,9 @@ EOF_ROTATE
     chmod 644 /etc/logrotate.d/vps-tool-fail2ban /etc/logrotate.d/vps-tool
     if command_exists logrotate; then
         logrotate --debug /etc/logrotate.d/vps-tool-fail2ban >/dev/null 2>&1 \
-            || { log_error "Fail2ban logrotate 配置验证失败"; return 1; }
+            || { log_error "Fail2ban logrotate 配置检查失败"; return 1; }
         logrotate --debug /etc/logrotate.d/vps-tool >/dev/null 2>&1 \
-            || { log_error "vps-tool logrotate 配置验证失败"; return 1; }
+            || { log_error "vps-tool logrotate 配置检查失败"; return 1; }
     fi
     log_success "日志自动轮转已配置，Fail2ban 日志保留 ${retention} 天"
 }

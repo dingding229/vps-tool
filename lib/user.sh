@@ -115,7 +115,7 @@ generate_authorized_key() {
 
     public_key="$(cat "${key_file}.pub")"
     validate_public_key_line "$public_key" \
-        || { cleanup_generated_private_key; log_error "自动生成的公钥验证失败"; return 1; }
+        || { cleanup_generated_private_key; log_error "自动生成的公钥检查失败"; return 1; }
     GENERATED_PUBLIC_KEY_LINE="$public_key"
     GENERATED_KEY_CONFIRMED=0
     printf '%s\n' "$public_key" >> "$TARGET_AUTH_KEYS"
@@ -135,17 +135,17 @@ generate_authorized_key() {
 
     while true; do
         if [[ "$validation_mode" == "deferred" ]]; then
-            printf '\n%sroot 登录尚未启用，请先下载并妥善保存私钥；稍后会统一测试登录。%s\n' \
+            printf '\n%sroot 登录尚未启用，请先下载并妥善保存私钥；稍后会统一确认登录。%s\n' \
                 "$C_YELLOW" "$C_RESET"
             if confirm "是否已经下载并保存私钥" "Y"; then
-                log_success "私钥将在 root 登录验证成功后从服务器删除"
+                log_success "私钥将在 root 登录确认成功后从服务器删除"
                 return 0
             fi
         else
-            printf '\n%s请在本地使用新密钥测试当前 SSH 端口：%s\n' "$C_YELLOW" "$C_RESET"
+            printf '\n%s请在本地使用新密钥确认当前 SSH 端口可以登录：%s\n' "$C_YELLOW" "$C_RESET"
             printf '  ssh -i ~/.ssh/vps-tool-%s -p %s %s@%s\n' \
                 "$TARGET_USER" "$current_port" "$TARGET_USER" "$server_ip"
-            if confirm "是否已经下载私钥并测试登录成功" "Y"; then
+            if confirm "是否已经下载私钥并成功登录" "Y"; then
                 GENERATED_KEY_CONFIRMED=1
                 cleanup_generated_private_key
                 log_success "服务器端临时私钥已删除，仅保留公钥"

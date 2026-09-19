@@ -447,7 +447,7 @@ vnstat_menu() {
         ui_menu_item 6 "流量最高日期" "Top 10"
 
         ui_menu_group "配置与状态"
-        ui_menu_item 7 "安装或修复 vnStat" "启用服务 / 选择接口"
+        ui_menu_item 7 "安装与配置 vnStat" "启用服务 / 选择接口"
         ui_menu_item 8 "切换监控接口" "更改默认查询接口"
         ui_menu_item 9 "查看 vnStat 状态" "服务 / 数据库"
 

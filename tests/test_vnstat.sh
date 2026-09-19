@@ -104,3 +104,16 @@ grep -q -- '--vnstat' vps-init.sh
 grep -q 'vnStat 流量监控' lib/status.sh
 grep -q 'vnStat 流量监控检查' lib/verify.sh
 printf 'vnStat menu and integration: OK\n'
+
+
+# vnStat 查询项保持连续，安装、接口和状态集中在配置区域。
+vnstat_menu_view="$(vnstat_menu <<< '0' 2>/dev/null)"
+python3 - "$vnstat_menu_view" <<'PY_VNSTAT_MENU'
+import sys
+text = sys.argv[1]
+labels = ["流量查询", "配置与状态", "其他"]
+positions = [text.index(label) for label in labels]
+assert positions == sorted(positions)
+assert text.index("今日流量") < text.index("安装与配置 vnStat")
+PY_VNSTAT_MENU
+printf 'vnStat menu grouping: OK\n'
