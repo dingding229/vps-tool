@@ -33,12 +33,38 @@ random_ssh_port() {
     printf '35222'
 }
 
+effective_ssh_ports() {
+    local target_user="${1:-root}"
+    sshd -T -C "user=${target_user},host=localhost,addr=127.0.0.1" 2>/dev/null \
+        | awk '$1=="port" {print $2}'
+}
+
+unique_port_list() {
+    awk 'NF && !seen[$1]++ {print $1}'
+}
+
+should_write_ssh_port() {
+    local new_port="$1" current_port="$2" target_user="${3:-root}"
+    local current_ports current_count
+    [[ "$new_port" != "$current_port" ]] && return 0
+
+    # 当前端口由 vps-tool 自己管理且没有重复来源时必须保留；否则跳过重复 Port 声明。
+    if [[ -f "$SSH_DROPIN_FILE" ]] \
+        && awk -v wanted="$current_port" 'tolower($1)=="port" && $2==wanted {found=1} END {exit !found}' "$SSH_DROPIN_FILE"; then
+        current_ports="$(effective_ssh_ports "$target_user" || true)"
+        current_count="$(awk 'NF {count++} END {print count+0}' <<< "$current_ports")"
+        (( current_count <= 1 )) && return 0
+    fi
+    return 1
+}
+
 write_ssh_dropin() {
-    local port="$1" allow_root="$2"
+    local port="$1" allow_root="$2" write_port="${3:-yes}"
     mkdir -p "$(dirname "$SSH_DROPIN_FILE")"
-    cat > "$SSH_DROPIN_FILE" <<EOF_SSH
-# Managed by vps-tool. Generated: $(beijing_iso)
-Port ${port}
+    {
+        printf '# Managed by vps-tool. Generated: %s\n' "$(beijing_iso)"
+        [[ "$write_port" == "yes" ]] && printf 'Port %s\n' "$port"
+        cat <<EOF_SSH
 PubkeyAuthentication yes
 PasswordAuthentication no
 KbdInteractiveAuthentication no
@@ -50,16 +76,26 @@ MaxAuthTries 4
 LoginGraceTime 30
 X11Forwarding no
 EOF_SSH
+    } > "$SSH_DROPIN_FILE"
     chmod 600 "$SSH_DROPIN_FILE"
 }
 
 verify_effective_ssh_config() {
-    local port="$1" target_user="$2" effective
+    local port="$1" target_user="$2" effective effective_ports unique_ports raw_display
     sshd -t || return 1
     effective="$(sshd -T -C "user=${target_user},host=localhost,addr=127.0.0.1" 2>/dev/null)" || return 1
-    local effective_ports
     effective_ports="$(awk '$1=="port" {print $2}' <<< "$effective")"
-    [[ "$effective_ports" == "$port" ]] || { log_error "有效 SSH 端口不是唯一的 ${port}（当前：${effective_ports//$'\n'/,}）"; return 1; }
+    unique_ports="$(unique_port_list <<< "$effective_ports")"
+    raw_display="${effective_ports//$'\n'/,}"
+
+    # OpenSSH 可能因多个配置文件重复输出同一个 Port；相同值去重后视为一个有效端口。
+    if [[ "$unique_ports" != "$port" ]]; then
+        log_error "有效 SSH 端口不是唯一的 ${port}（当前：${raw_display:-未检测到}）"
+        return 1
+    fi
+    if [[ "$(awk 'NF {count++} END {print count+0}' <<< "$effective_ports")" -gt 1 ]]; then
+        log_info "检测到重复的 Port ${port} 声明，已按同一端口跳过重复项"
+    fi
     grep -qx 'passwordauthentication no' <<< "$effective" || { log_error "PasswordAuthentication 未生效"; return 1; }
     grep -qx 'kbdinteractiveauthentication no' <<< "$effective" || { log_error "KbdInteractiveAuthentication 未生效"; return 1; }
     grep -qx 'pubkeyauthentication yes' <<< "$effective" || { log_error "PubkeyAuthentication 未生效"; return 1; }
@@ -79,6 +115,7 @@ configure_ssh_interactive() {
     ui_kv "当前端口" "${C_BOLD}${C_CYAN}${CURRENT_SSH_PORT}${C_RESET}"
 
     local target_user default_port new_port root_policy backup_dir backup_file existed=0
+    local port_changed=0 write_port="yes" rollback_firewall_kind="none"
     ui_subtitle "密钥认证"
     target_user="$(prompt_value '配置密钥登录的用户' "${SUDO_USER:-root}")"
     ensure_authorized_key "$target_user" "$CURRENT_SSH_PORT"
@@ -94,6 +131,11 @@ configure_ssh_interactive() {
         break
     done
     NEW_SSH_PORT="$new_port"
+    if [[ "$NEW_SSH_PORT" != "$CURRENT_SSH_PORT" ]]; then
+        port_changed=1
+    elif ! should_write_ssh_port "$NEW_SSH_PORT" "$CURRENT_SSH_PORT" "$target_user"; then
+        write_port="no"
+    fi
 
     root_policy="prohibit-password"
     if [[ "$target_user" != "root" ]] && confirm "完全禁止 root SSH 登录" "Y"; then
@@ -107,14 +149,23 @@ configure_ssh_interactive() {
 
     ui_section "02" "配置预览"
     ui_kv "目标用户" "$target_user"
-    ui_kv "SSH 端口" "${CURRENT_SSH_PORT}  →  ${C_BOLD}${C_CYAN}${NEW_SSH_PORT}${C_RESET}"
+    if (( port_changed == 1 )); then
+        ui_kv "SSH 端口" "${CURRENT_SSH_PORT}  →  ${C_BOLD}${C_CYAN}${NEW_SSH_PORT}${C_RESET}"
+    else
+        ui_kv "SSH 端口" "${C_BOLD}${C_CYAN}${CURRENT_SSH_PORT}${C_RESET}  ${C_DIM}保持不变${C_RESET}"
+    fi
     ui_kv "登录方式" "${C_GREEN}✔ 仅允许公钥${C_RESET}"
     ui_kv "root 策略" "$root_policy"
     ui_kv "回滚保护" "${SSH_ROLLBACK_TIMEOUT} 秒"
     printf '\n'
     confirm "确认继续" "Y" || { log_warn "已取消 SSH 配置"; return 0; }
 
-    firewall_allow_ssh_port "$NEW_SSH_PORT" || { log_error "未确认新端口已放行，已停止"; return 1; }
+    if (( port_changed == 1 )); then
+        firewall_allow_ssh_port "$NEW_SSH_PORT" || { log_error "未确认新端口已放行，已停止"; return 1; }
+        rollback_firewall_kind="$FIREWALL_KIND"
+    else
+        log_info "新端口与当前端口一致，跳过端口切换和防火墙变更"
+    fi
 
     backup_dir="$(create_backup_dir)"
     backup_file="${backup_dir}/00-vps-tool.conf"
@@ -123,19 +174,19 @@ configure_ssh_interactive() {
         existed=1
     fi
 
-    write_ssh_dropin "$NEW_SSH_PORT" "$root_policy"
+    write_ssh_dropin "$NEW_SSH_PORT" "$root_policy" "$write_port"
     if ! verify_effective_ssh_config "$NEW_SSH_PORT" "$target_user"; then
         log_error "SSH 配置验证失败，正在恢复"
         [[ "$existed" == "1" ]] && cp -a "$backup_file" "$SSH_DROPIN_FILE" || rm -f "$SSH_DROPIN_FILE"
-        firewall_remove_ssh_port "$NEW_SSH_PORT"
+        (( port_changed == 1 )) && firewall_remove_ssh_port "$NEW_SSH_PORT"
         return 1
     fi
     log_success "sshd 配置语法和有效参数验证通过"
 
-    if ! schedule_ssh_rollback "$backup_file" "$existed" "$NEW_SSH_PORT" "$FIREWALL_KIND" "$SSH_SERVICE" "$SSH_ROLLBACK_TIMEOUT"; then
+    if ! schedule_ssh_rollback "$backup_file" "$existed" "$NEW_SSH_PORT" "$rollback_firewall_kind" "$SSH_SERVICE" "$SSH_ROLLBACK_TIMEOUT"; then
         log_error "无法创建 SSH 自动回滚任务，已恢复原配置"
         [[ "$existed" == "1" ]] && cp -a "$backup_file" "$SSH_DROPIN_FILE" || rm -f "$SSH_DROPIN_FILE"
-        firewall_remove_ssh_port "$NEW_SSH_PORT"
+        (( port_changed == 1 )) && firewall_remove_ssh_port "$NEW_SSH_PORT"
         return 1
     fi
     systemctl reload "$SSH_SERVICE"
