@@ -1,0 +1,14 @@
+# Managed by vps-tool
+[DEFAULT]
+bantime = {{BANTIME}}
+findtime = {{FINDTIME}}
+maxretry = {{MAXRETRY}}
+bantime.increment = true
+bantime.factor = 2
+bantime.maxtime = {{MAX_BANTIME}}
+
+[sshd]
+enabled = true
+port = {{SSH_PORT}}
+backend = systemd
+mode = normal

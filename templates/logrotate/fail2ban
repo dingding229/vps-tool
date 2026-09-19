@@ -1,0 +1,14 @@
+/var/log/fail2ban.log {
+    daily
+    rotate 14
+    maxage 14
+    missingok
+    compress
+    delaycompress
+    notifempty
+    create 0640 root adm
+    sharedscripts
+    postrotate
+        /usr/bin/fail2ban-client flushlogs >/dev/null 2>&1 || true
+    endscript
+}

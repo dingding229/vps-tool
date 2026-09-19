@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+
+run_all() {
+    run_preflight || return 1
+    configure_ssh_interactive || return 1
+    configure_fail2ban_interactive || return 1
+    install_bbr_interactive || return 1
+    verify_system
+}
+
+main_menu() {
+    local choice
+    while true; do
+        ui_header
+        ui_title "主菜单"
+        ui_menu_item 1 "一键完成全部配置" "SSH + Fail2ban + BBRv3"
+        ui_menu_item 2 "配置 SSH 安全策略" "密钥登录 / 修改端口"
+        ui_menu_item 3 "安装和配置 Fail2ban" "防暴力破解"
+        ui_menu_item 4 "查看 Fail2ban 日志" "日志中心"
+        ui_menu_item 5 "查看系统状态" "当前配置总览"
+        ui_menu_item 6 "验证系统配置" "安全检查"
+        ui_menu_item 7 "安装 BBRv3" "需要重启"
+        ui_menu_item 8 "立即执行 SSH 回滚" "恢复待确认配置"
+        ui_menu_item 0 "退出"
+        printf '\n'
+        choice="$(select_number '请选择功能' 0 8 1)" || return
+        case "$choice" in
+            1) run_all; pause_screen ;;
+            2) configure_ssh_interactive; pause_screen ;;
+            3) configure_fail2ban_interactive; pause_screen ;;
+            4) fail2ban_log_menu ;;
+            5) show_full_status; pause_screen ;;
+            6) verify_system; pause_screen ;;
+            7) install_bbr_interactive; pause_screen ;;
+            8) run_ssh_rollback_now; pause_screen ;;
+            0) printf '\n%s再见。%s\n' "$C_CYAN" "$C_RESET"; return 0 ;;
+        esac
+    done
+}
