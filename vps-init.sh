@@ -9,6 +9,9 @@ for module in common preflight firewall user rollback ssh logrotate fail2ban fai
     source "${SCRIPT_DIR}/lib/${module}.sh"
 done
 
+# 自动生成的私钥仅在用户完成下载和测试前临时保留。
+trap cleanup_generated_private_key EXIT
+
 
 usage() {
     cat <<EOF_USAGE

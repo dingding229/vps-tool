@@ -78,7 +78,7 @@ configure_ssh_interactive() {
 
     local target_user default_port new_port root_policy backup_dir backup_file existed=0
     target_user="$(prompt_value '配置密钥登录的用户' "${SUDO_USER:-root}")"
-    ensure_authorized_key "$target_user"
+    ensure_authorized_key "$target_user" "$CURRENT_SSH_PORT"
 
     default_port="$(random_ssh_port)"
     while true; do
