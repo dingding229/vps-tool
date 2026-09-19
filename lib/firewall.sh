@@ -28,12 +28,12 @@ firewall_allow_ssh_port() {
             ;;
         nftables)
             log_warn "检测到自定义 nftables 规则。脚本不会直接修改规则，请确认 TCP/${port} 已放行"
-            confirm "已在 nftables 或云安全组放行 TCP/${port}" "N" \
+            confirm "已在 nftables 或云安全组放行 TCP/${port}" "Y" \
                 || return 1
             ;;
         none)
             log_warn "未检测到活动的 UFW/firewalld；仍需确认云厂商安全组已放行 TCP/${port}"
-            confirm "已确认云安全组允许 TCP/${port}" "N" || return 1
+            confirm "已确认云安全组允许 TCP/${port}" "Y" || return 1
             ;;
     esac
 }

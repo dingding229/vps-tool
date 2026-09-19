@@ -79,13 +79,20 @@ pause_screen() {
 }
 
 confirm() {
-    local prompt="$1" default="${2:-N}" answer suffix
-    if [[ "$default" =~ ^[Yy]$ ]]; then suffix='[Y/n]'; else suffix='[y/N]'; fi
-    printf '%s?%s %s %s ' "$C_YELLOW" "$C_RESET" "$prompt" "$suffix" >&2
-    read -r answer || return 1
-    answer="${answer:-$default}"
-    [[ "$answer" =~ ^[Yy]([Ee][Ss])?$ ]]
+    local prompt="$1" answer
+    while true; do
+        printf '%s?%s %s %s[Y/n]%s ' \
+            "$C_YELLOW" "$C_RESET" "$prompt" "$C_DIM" "$C_RESET" >&2
+        read -r answer || return 1
+        answer="${answer:-Y}"
+        case "$answer" in
+            Y|y|YES|Yes|yes) return 0 ;;
+            N|n|NO|No|no) return 1 ;;
+            *) log_warn "请输入 Y 或 N；直接回车默认为 Y" >&2 ;;
+        esac
+    done
 }
+
 
 prompt_value() {
     local prompt="$1" default="${2:-}" value

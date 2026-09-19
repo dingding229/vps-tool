@@ -21,7 +21,7 @@ install_bbr_interactive() {
     check_supported_os
     printf '%s注意：BBRv3 会安装自定义内核，完成后通常需要重启。%s\n' "$C_YELLOW" "$C_RESET"
     printf '%s上游项目：%s%s%s\n\n' "$C_DIM" "$C_CYAN" "$BBR_REPOSITORY_URL" "$C_RESET"
-    confirm "下载并运行 Actions-bbr-v3 安装器" "N" || { log_warn "已取消 BBRv3 安装"; return 0; }
+    confirm "下载并运行 Actions-bbr-v3 安装器" "Y" || { log_warn "已取消 BBRv3 安装"; return 0; }
 
     command_exists curl || { log_error "未找到 curl"; return 1; }
     local temp_dir installer

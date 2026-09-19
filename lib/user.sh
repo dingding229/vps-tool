@@ -72,7 +72,7 @@ show_generated_private_key() {
 }
 
 generate_authorized_key() {
-    local current_port="${1:-22}" key_name key_file group server_ip answer public_key old_umask
+    local current_port="${1:-22}" key_name key_file group server_ip public_key old_umask
     key_name="vps-tool-${TARGET_USER}-$(date '+%Y%m%d-%H%M%S')"
     key_file="${TARGET_HOME}/.ssh/.${key_name}"
     group="$(id -gn "$TARGET_USER")"
@@ -98,7 +98,8 @@ generate_authorized_key() {
     GENERATED_PRIVATE_KEY="$key_file"
 
     public_key="$(cat "${key_file}.pub")"
-    validate_public_key_line "$public_key" || { cleanup_generated_private_key; log_error "自动生成的公钥验证失败"; return 1; }
+    validate_public_key_line "$public_key" \
+        || { cleanup_generated_private_key; log_error "自动生成的公钥验证失败"; return 1; }
     GENERATED_PUBLIC_KEY_LINE="$public_key"
     GENERATED_KEY_CONFIRMED=0
     printf '%s\n' "$public_key" >> "$TARGET_AUTH_KEYS"
@@ -110,37 +111,35 @@ generate_authorized_key() {
     printf '  %sscp -P %s %s@%s:%s ~/.ssh/vps-tool-%s%s\n' \
         "$C_CYAN" "$current_port" "$TARGET_USER" "$server_ip" "$key_file" "$TARGET_USER" "$C_RESET"
     printf '  chmod 600 ~/.ssh/vps-tool-%s\n\n' "$TARGET_USER"
-    printf '%s如果无法使用 scp，输入 PRINT 可在当前终端显示私钥。%s\n' "$C_DIM" "$C_RESET"
+
+    if confirm "是否在当前终端显示私钥" "Y"; then
+        show_generated_private_key "$key_file"
+    fi
 
     while true; do
-        answer="$(prompt_value '下载并测试成功后输入 KEY_READY；显示私钥输入 PRINT；取消输入 CANCEL' '')"
-        case "$answer" in
-            PRINT)
-                show_generated_private_key "$key_file"
-                ;;
-            KEY_READY)
-                printf '\n%s请确认已使用新密钥测试当前 SSH 端口：%s\n' "$C_YELLOW" "$C_RESET"
-                printf '  ssh -i ~/.ssh/vps-tool-%s -p %s %s@%s\n' \
-                    "$TARGET_USER" "$current_port" "$TARGET_USER" "$server_ip"
-                if confirm "新密钥登录测试已经成功" "N"; then
-                    GENERATED_KEY_CONFIRMED=1
-                    cleanup_generated_private_key
-                    log_success "服务器端临时私钥已删除，仅保留公钥"
-                    return 0
-                fi
-                ;;
-            CANCEL)
-                cleanup_generated_private_key
-                log_warn "已删除服务器端临时私钥并取消配置"
-                return 1
-                ;;
-            *) log_warn "请输入 KEY_READY、PRINT 或 CANCEL" ;;
-        esac
+        printf '\n%s请在本地使用新密钥测试当前 SSH 端口：%s\n' "$C_YELLOW" "$C_RESET"
+        printf '  ssh -i ~/.ssh/vps-tool-%s -p %s %s@%s\n' \
+            "$TARGET_USER" "$current_port" "$TARGET_USER" "$server_ip"
+        if confirm "是否已经下载私钥并测试登录成功" "Y"; then
+            GENERATED_KEY_CONFIRMED=1
+            cleanup_generated_private_key
+            log_success "服务器端临时私钥已删除，仅保留公钥"
+            return 0
+        fi
+        if confirm "是否取消本次密钥配置" "Y"; then
+            cleanup_generated_private_key
+            log_warn "已删除服务器端临时私钥和新增公钥"
+            return 1
+        fi
+        if confirm "是否重新显示私钥" "Y"; then
+            show_generated_private_key "$key_file"
+        fi
     done
 }
 
+
 ensure_authorized_key() {
-    local target_user="$1" current_port="${2:-22}" choice key
+    local target_user="$1" current_port="${2:-22}" key
     resolve_target_user "$target_user"
     fix_authorized_keys_permissions
     if has_valid_authorized_key; then
@@ -150,20 +149,20 @@ ensure_authorized_key() {
     fi
 
     log_warn "${TARGET_USER} 尚未配置有效 SSH 公钥"
-    printf '\n  %s[1]%s 自动生成 Ed25519 密钥 %s推荐%s\n' "$C_GREEN" "$C_RESET" "$C_DIM" "$C_RESET"
-    printf '  %s[2]%s 粘贴已有 SSH 公钥\n' "$C_GREEN" "$C_RESET"
-    printf '  %s[0]%s 取消\n\n' "$C_GREEN" "$C_RESET"
-    choice="$(select_number '请选择密钥配置方式' 0 2 1)" || return 1
-    case "$choice" in
-        1) generate_authorized_key "$current_port" ;;
-        2)
-            printf '%s请粘贴一整行 SSH 公钥（推荐 ssh-ed25519）：%s\n' "$C_CYAN" "$C_RESET"
-            read -r key
-            validate_public_key_line "$key" || { log_error "SSH 公钥格式无效，已停止配置"; return 1; }
-            printf '%s\n' "$key" >> "$TARGET_AUTH_KEYS"
-            fix_authorized_keys_permissions
-            log_success "SSH 公钥已写入 ${TARGET_AUTH_KEYS}"
-            ;;
-        0) log_warn "已取消 SSH 密钥配置"; return 1 ;;
-    esac
+    if confirm "是否自动生成 Ed25519 密钥" "Y"; then
+        generate_authorized_key "$current_port"
+        return $?
+    fi
+    if ! confirm "是否粘贴已有 SSH 公钥" "Y"; then
+        log_warn "已取消 SSH 密钥配置"
+        return 1
+    fi
+
+    printf '%s请粘贴一整行 SSH 公钥（推荐 ssh-ed25519）：%s\n' "$C_CYAN" "$C_RESET"
+    read -r key
+    validate_public_key_line "$key" \
+        || { log_error "SSH 公钥格式无效，已停止配置"; return 1; }
+    printf '%s\n' "$key" >> "$TARGET_AUTH_KEYS"
+    fix_authorized_keys_permissions
+    log_success "SSH 公钥已写入 ${TARGET_AUTH_KEYS}"
 }

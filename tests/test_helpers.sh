@@ -38,6 +38,16 @@ assert_fail validate_public_key_line 'ssh-ed25519 invalid'
 
 printf 'helper tests: OK\n'
 
+
+# 所有确认均为 Y/N，直接回车默认为 Y。
+printf '\n' | confirm "默认确认测试" "Y"
+if printf 'N\n' | confirm "否定确认测试" "Y"; then
+    printf 'FAIL: N should return failure\n'
+    exit 1
+fi
+printf 'invalid\n\n' | confirm "非法输入后默认确认测试" "Y"
+printf 'confirmation flow: OK\n'
+
 # 自动生成密钥流程：模拟用户已下载并验证，私钥应删除、公钥应保留。
 original_user="$(id -un)"
 original_home="${HOME}"
@@ -47,7 +57,6 @@ TARGET_HOME="$temp_home"
 TARGET_AUTH_KEYS="${temp_home}/.ssh/authorized_keys"
 mkdir -p "${temp_home}/.ssh"
 touch "$TARGET_AUTH_KEYS"
-prompt_value() { printf 'KEY_READY'; }
 confirm() { return 0; }
 generate_authorized_key 22 >/dev/null
 [[ -s "$TARGET_AUTH_KEYS" ]]
@@ -66,7 +75,15 @@ TARGET_HOME="$temp_home"
 TARGET_AUTH_KEYS="${temp_home}/.ssh/authorized_keys"
 mkdir -p "${temp_home}/.ssh"
 touch "$TARGET_AUTH_KEYS"
-prompt_value() { printf 'CANCEL'; }
+confirm_call=0
+confirm() {
+    confirm_call=$((confirm_call + 1))
+    case "$confirm_call" in
+        1|2) return 1 ;;
+        3) return 0 ;;
+    esac
+    return 1
+}
 if generate_authorized_key 22 >/dev/null; then
     printf 'FAIL: cancelled key generation unexpectedly succeeded\n'
     exit 1

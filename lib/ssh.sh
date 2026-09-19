@@ -93,9 +93,8 @@ configure_ssh_interactive() {
     NEW_SSH_PORT="$new_port"
 
     root_policy="prohibit-password"
-    if [[ "$target_user" != "root" ]] && confirm "完全禁止 root SSH 登录" "N"; then
-        if ! id -nG "$target_user" | tr ' ' '
-' | grep -qx 'sudo'; then
+    if [[ "$target_user" != "root" ]] && confirm "完全禁止 root SSH 登录" "Y"; then
+        if ! id -nG "$target_user" | tr ' ' $'\n' | grep -qx 'sudo'; then
             log_error "用户 ${target_user} 不在 sudo 组中，拒绝禁用 root SSH 登录"
             return 1
         fi
@@ -108,7 +107,7 @@ configure_ssh_interactive() {
     printf '  • 登录方式：仅公钥\n'
     printf '  • root 策略：%s\n' "$root_policy"
     printf '  • 自动回滚：%s 秒\n\n' "$SSH_ROLLBACK_TIMEOUT"
-    confirm "确认继续" "N" || { log_warn "已取消 SSH 配置"; return 0; }
+    confirm "确认继续" "Y" || { log_warn "已取消 SSH 配置"; return 0; }
 
     firewall_allow_ssh_port "$NEW_SSH_PORT" || { log_error "未确认新端口已放行，已停止"; return 1; }
 
@@ -142,35 +141,28 @@ configure_ssh_interactive() {
     printf '\n%s%s╭──────────────────── 重要：连接验证 ────────────────────╮%s\n' "$C_BOLD" "$C_YELLOW" "$C_RESET"
     printf '%s│%s 请勿关闭当前窗口。请新开终端执行：                     %s│%s\n' "$C_YELLOW" "$C_RESET" "$C_YELLOW" "$C_RESET"
     printf '%s│%s %sssh -p %s %s@服务器IP%s%*s%s│%s\n' "$C_YELLOW" "$C_RESET" "$C_BOLD" "$NEW_SSH_PORT" "$target_user" "$C_RESET" 16 '' "$C_YELLOW" "$C_RESET"
-    printf '%s│%s 新连接成功后，在下方输入大写 CONFIRM。                 %s│%s\n' "$C_YELLOW" "$C_RESET" "$C_YELLOW" "$C_RESET"
+    printf '%s│%s 新连接成功后返回当前窗口并选择 Y。                     %s│%s\n' "$C_YELLOW" "$C_RESET" "$C_YELLOW" "$C_RESET"
     printf '%s╰──────────────────────────────────────────────────────────╯%s\n' "$C_YELLOW" "$C_RESET"
 
-    local answer
-    while true; do
-        answer="$(prompt_value '请输入 CONFIRM，或输入 ROLLBACK 立即恢复' '')"
-        case "$answer" in
-            CONFIRM)
-                if ! cancel_ssh_rollback "$NEW_SSH_PORT"; then
-                    log_error "自动回滚可能已经执行；不会删除旧端口规则。请重新运行 SSH 配置"
-                    return 1
-                fi
-                if [[ "$CURRENT_SSH_PORT" != "$NEW_SSH_PORT" ]]; then
-                    firewall_remove_ssh_port "$CURRENT_SSH_PORT"
-                fi
-                printf 'SSH_PORT=%q\nSSH_USER=%q\nUPDATED_AT=%q\n' \
-                    "$NEW_SSH_PORT" "$target_user" "$(date -Is)" > "${APP_STATE_DIR}/ssh.conf"
-                chmod 600 "${APP_STATE_DIR}/ssh.conf"
-                log_success "SSH 安全配置已完成"
-                return 0
-                ;;
-            ROLLBACK)
-                run_ssh_rollback_now
-                log_warn "SSH 配置已回滚"
-                return 1
-                ;;
-            *) log_warn "请先在第二个终端验证连接，然后输入 CONFIRM" ;;
-        esac
-    done
+    if confirm "是否已使用新端口和密钥登录成功" "Y"; then
+        if ! cancel_ssh_rollback "$NEW_SSH_PORT"; then
+            log_error "自动回滚可能已经执行；不会删除旧端口规则。请重新运行 SSH 配置"
+            return 1
+        fi
+        if [[ "$CURRENT_SSH_PORT" != "$NEW_SSH_PORT" ]]; then
+            firewall_remove_ssh_port "$CURRENT_SSH_PORT"
+        fi
+        printf 'SSH_PORT=%q\nSSH_USER=%q\nUPDATED_AT=%q\n' \
+            "$NEW_SSH_PORT" "$target_user" "$(date -Is)" > "${APP_STATE_DIR}/ssh.conf"
+        chmod 600 "${APP_STATE_DIR}/ssh.conf"
+        log_success "SSH 安全配置已完成"
+        return 0
+    fi
+
+    run_ssh_rollback_now
+    log_warn "已按选择恢复原 SSH 配置"
+    return 1
+
 }
 
 show_ssh_status() {

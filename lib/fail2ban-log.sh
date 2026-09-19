@@ -112,7 +112,7 @@ unban_ip_interactive() {
     grep -qw -- "$jail" <<< "$jails" || { log_warn "Jail 不存在：${jail}"; return 1; }
     ip="$(prompt_value '要解封的 IP 地址' '')"
     validate_ip "$ip" || { log_warn "IP 地址格式无效"; return 1; }
-    confirm "确认从 ${jail} 解封 ${ip}" "N" || return 0
+    confirm "确认从 ${jail} 解封 ${ip}" "Y" || return 0
     if fail2ban-client set "$jail" unbanip "$ip" >/dev/null; then
         log_success "已从 ${jail} 解封 ${ip}"
     else
