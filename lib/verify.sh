@@ -63,10 +63,28 @@ verify_system() {
         log_warn "Fail2ban 未安装、未运行或 sshd Jail 未启用"
     fi
 
-    ui_section "03" "BBR / 内核检查"
+    ui_section "03" "vnStat 流量监控检查"
+    local vnstat_result=0
+    verify_vnstat || vnstat_result=$?
+    case "$vnstat_result" in
+        0)
+            print_vnstat_status || true
+            log_success "vnStat 服务、监控接口和 JSON 数据正常"
+            ;;
+        2)
+            print_vnstat_status || true
+            log_warn "vnStat 尚未安装"
+            ;;
+        *)
+            print_vnstat_status || true
+            log_warn "vnStat 已安装但服务、接口或数据读取异常"
+            ;;
+    esac
+
+    ui_section "04" "BBR / 内核检查"
     show_bbr_status
 
-    ui_section "04" "回滚保护"
+    ui_section "05" "回滚保护"
     if [[ -f "$SSH_ROLLBACK_STATE" ]]; then
         ui_kv "SSH 回滚任务" "${C_YELLOW}▲ 等待确认${C_RESET}"
         log_warn "当前存在待确认的 SSH 自动回滚任务"

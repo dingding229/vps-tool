@@ -1,10 +1,10 @@
 # VPS Tool
 
-VPS 到手后的一键初始化脚本。当前版本 `v0.3.3`，使用 Shell 编写，提供美化交互界面。
+VPS 到手后的一键初始化脚本。当前版本 `v0.4.0`，使用 Shell 编写，提供美化交互界面。
 
 ## 交互界面
 
-- 页面采用统一的编号区块顺序：环境、SSH、Fail2ban、网络加速、文件与备份；
+- 页面采用统一的编号区块顺序：环境、SSH、Fail2ban、vnStat、网络加速、文件与备份；
 - 中文标签按终端显示宽度对齐，不再使用按字节计算的 `printf %-Ns`；
 - 主菜单和日志菜单按照“配置 → 监控 → 验证 → 恢复”分组；
 - 窄终端使用紧凑的双行安全事件布局，宽终端自动切换为表格；
@@ -29,6 +29,10 @@ VPS 到手后的一键初始化脚本。当前版本 `v0.3.3`，使用 Shell 编
 - 查看当前 Jail 和封禁 IP
 - 从脚本解封 IP
 - 配置 Fail2ban 和工具自身的 logrotate 清理策略
+- 安装并启用 vnStat，自动识别和选择主要网络接口
+- 从脚本查看累计、最近 24 小时、最近 30 天、最近 12 个月和流量最高日期
+- vnStat 数据统一转换为 KiB / MiB / GiB / TiB，并以中文表格展示，不直接返回原始 JSON
+- vnStat 时间戳统一转换为北京时间，支持切换默认查询接口
 - 调用 [Actions-bbr-v3](https://github.com/byJoey/Actions-bbr-v3)
 - 系统状态和最终配置验证
 
@@ -107,6 +111,9 @@ sudo vps-tool --verify
 # 查看 Fail2ban 日志
 sudo vps-tool --fail2ban-logs
 
+# 打开 vnStat 流量中心
+sudo vps-tool --vnstat
+
 # 启用 root SSH 登录
 sudo vps-tool --enable-root
 
@@ -114,6 +121,26 @@ sudo vps-tool --enable-root
 sudo vps-tool --rollback
 ```
 
+
+## vnStat 流量监控
+
+主菜单可分别选择“安装 vnStat 流量监控”和“查看 vnStat 流量”，也可以直接执行：
+
+```bash
+sudo vps-tool --vnstat
+```
+
+流量中心提供：
+
+1. 流量总览：数据库更新时间、开始采集时间、累计接收/发送/合计、最新日月统计；
+2. 今日流量：按北京时间筛选当天流量；
+3. 最近 24 小时：按北京时间列出每小时流量；
+4. 最近 30 天：按日期列出每日流量；
+5. 最近 12 个月：按月份列出月流量；
+6. 流量最高日期：格式化显示 Top 10；
+7. 安装或修复服务、切换默认监控接口、查看服务状态。
+
+所有数据都通过 vnStat JSON 接口读取后再格式化，不会把原始 JSON 或原始命令输出直接显示到页面。流量单位使用 1024 进制自动换算（B、KiB、MiB、GiB、TiB、PiB）。新安装的 vnStat 只能从安装后开始采集，不会补生成历史流量；刚安装时页面显示“等待采集”属于正常情况。
 
 ## 启用 root SSH 登录
 
@@ -162,5 +189,6 @@ sudo vps-tool --enable-root
 - 启用 root 密码登录的风险高于仅密钥登录；默认选项始终是仅密钥模式。
 - BBRv3 安装器来自上游 GitHub，执行前会先下载到临时文件并记录日志。
 - Fail2ban 日志可能来自 `/var/log/fail2ban.log` 或 systemd journal，脚本会自动检测。
+- vnStat 统计依赖后台持续采集；重装前如需保留历史数据，请自行备份 `/var/lib/vnstat/`。
 - 日志查看和解封功能需要 root 权限。
 - 第一次生产使用前，建议在测试 VPS 上验证，并确保有云厂商控制台或救援模式。

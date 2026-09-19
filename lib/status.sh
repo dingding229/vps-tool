@@ -12,10 +12,13 @@ show_full_status() {
     ui_section "03" "Fail2ban 防护"
     print_fail2ban_status || true
 
-    ui_section "04" "网络加速"
+    ui_section "04" "vnStat 流量监控"
+    print_vnstat_status || true
+
+    ui_section "05" "网络加速"
     show_bbr_status
 
-    ui_section "05" "文件与备份"
+    ui_section "06" "文件与备份"
     ui_kv "安装日志" "$APP_LOG_FILE"
     ui_kv "备份目录" "$APP_BACKUP_DIR"
     ui_kv "配置目录" "$APP_ETC_DIR"

@@ -20,7 +20,7 @@ SCRIPT_DIR="$(resolve_script_dir)" \
     || { printf '无法定位 VPS Tool 安装目录\n' >&2; exit 1; }
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/config/defaults.conf"
-for module in common preflight firewall user rollback ssh root-login logrotate fail2ban fail2ban-log bbr verify status menu; do
+for module in common preflight firewall user rollback ssh root-login logrotate fail2ban fail2ban-log vnstat bbr verify status menu; do
     # shellcheck disable=SC1090
     source "${SCRIPT_DIR}/lib/${module}.sh"
 done
@@ -45,12 +45,13 @@ ${APP_NAME} ${APP_VERSION}
   --status            查看系统状态
   --verify            验证配置
   --fail2ban-logs     进入 Fail2ban 日志中心
+  --vnstat            进入 vnStat 流量中心
   --enable-root       启用 root SSH 登录
   --rollback          立即执行待处理 SSH 回滚
   --no-clear          不清理终端画面
   --help              显示帮助
 
-说明：第一版的 SSH、Fail2ban 和 BBRv3 配置建议在 VPS 控制台可用时执行。
+说明：SSH、Fail2ban、vnStat 和 BBRv3 配置建议在 VPS 控制台可用时执行。
 EOF_USAGE
 }
 
@@ -68,6 +69,7 @@ main() {
         --status) show_full_status ;;
         --verify) verify_system ;;
         --fail2ban-logs) fail2ban_log_menu ;;
+        --vnstat) vnstat_menu ;;
         --enable-root) enable_root_login_interactive ;;
         --rollback) run_ssh_rollback_now ;;
         --no-clear) export VPS_TOOL_NO_CLEAR=1; main_menu ;;
