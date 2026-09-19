@@ -39,11 +39,22 @@ sshd() {
     printf '%s\n' \
         'pubkeyauthentication yes' \
         'passwordauthentication no' \
-        'kbdinteractiveauthentication no'
+        'kbdinteractiveauthentication no' \
+        'authenticationmethods publickey' \
+        "permitrootlogin ${MOCK_PERMIT_ROOT:-prohibit-password}"
 }
 
 MOCK_PORTS='6900 6900'
 verify_effective_ssh_config 6900 root
+ssh_key_only_login_is_effective root
+
+MOCK_PERMIT_ROOT='no'
+if ssh_key_only_login_is_effective root; then
+    printf 'FAIL: disabled root login must not skip root connection verification\n'
+    exit 1
+fi
+ssh_key_only_login_is_effective ubuntu
+MOCK_PERMIT_ROOT='prohibit-password'
 
 MOCK_PORTS='22 6900'
 if verify_effective_ssh_config 6900 root; then

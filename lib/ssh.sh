@@ -43,6 +43,23 @@ unique_port_list() {
     awk 'NF && !seen[$1]++ {print $1}'
 }
 
+ssh_key_only_login_is_effective() {
+    local target_user="$1" effective password pubkey interactive methods permit_root
+    effective="$(sshd -T -C "user=${target_user},host=localhost,addr=127.0.0.1" 2>/dev/null)" \
+        || return 1
+    password="$(awk '$1=="passwordauthentication" {print $2; exit}' <<< "$effective")"
+    pubkey="$(awk '$1=="pubkeyauthentication" {print $2; exit}' <<< "$effective")"
+    interactive="$(awk '$1=="kbdinteractiveauthentication" {print $2; exit}' <<< "$effective")"
+    methods="$(awk '$1=="authenticationmethods" {print $2; exit}' <<< "$effective")"
+    [[ "$password" == "no" && "$pubkey" == "yes" \
+        && "$interactive" == "no" && "$methods" == "publickey" ]] || return 1
+
+    if [[ "$target_user" == "root" ]]; then
+        permit_root="$(awk '$1=="permitrootlogin" {print $2; exit}' <<< "$effective")"
+        [[ "$permit_root" == "prohibit-password" ]]
+    fi
+}
+
 should_write_ssh_port() {
     local new_port="$1" current_port="$2" target_user="${3:-root}"
     local current_ports current_count
@@ -116,6 +133,7 @@ configure_ssh_interactive() {
 
     local target_user default_port new_port root_policy backup_dir backup_file existed=0
     local port_changed=0 write_port="yes" rollback_firewall_kind="none"
+    local skip_connection_test=0
     ui_subtitle "密钥认证"
     target_user="$(prompt_value '配置密钥登录的用户' "${SUDO_USER:-root}")"
     ensure_authorized_key "$target_user" "$CURRENT_SSH_PORT"
@@ -133,8 +151,13 @@ configure_ssh_interactive() {
     NEW_SSH_PORT="$new_port"
     if [[ "$NEW_SSH_PORT" != "$CURRENT_SSH_PORT" ]]; then
         port_changed=1
-    elif ! should_write_ssh_port "$NEW_SSH_PORT" "$CURRENT_SSH_PORT" "$target_user"; then
-        write_port="no"
+    else
+        if ! should_write_ssh_port "$NEW_SSH_PORT" "$CURRENT_SSH_PORT" "$target_user"; then
+            write_port="no"
+        fi
+        if ssh_key_only_login_is_effective "$target_user"; then
+            skip_connection_test=1
+        fi
     fi
 
     root_policy="prohibit-password"
@@ -156,7 +179,13 @@ configure_ssh_interactive() {
     fi
     ui_kv "登录方式" "${C_GREEN}✔ 仅允许公钥${C_RESET}"
     ui_kv "root 策略" "$root_policy"
-    ui_kv "回滚保护" "${SSH_ROLLBACK_TIMEOUT} 秒"
+    if (( skip_connection_test == 1 )); then
+        ui_kv "连接验证" "${C_GREEN}自动跳过（当前已为仅密钥登录）${C_RESET}"
+        ui_kv "回滚保护" "${C_DIM}无需定时回滚${C_RESET}"
+    else
+        ui_kv "连接验证" "${C_YELLOW}需要新终端测试${C_RESET}"
+        ui_kv "回滚保护" "${SSH_ROLLBACK_TIMEOUT} 秒"
+    fi
     printf '\n'
     confirm "确认继续" "Y" || { log_warn "已取消 SSH 配置"; return 0; }
 
@@ -182,6 +211,28 @@ configure_ssh_interactive() {
         return 1
     fi
     log_success "sshd 配置语法和有效参数验证通过"
+
+    if (( skip_connection_test == 1 )); then
+        if ! systemctl reload "$SSH_SERVICE"; then
+            log_error "SSH 服务重新加载失败，正在恢复原配置"
+            [[ "$existed" == "1" ]] && cp -a "$backup_file" "$SSH_DROPIN_FILE" || rm -f "$SSH_DROPIN_FILE"
+            systemctl reload "$SSH_SERVICE" >/dev/null 2>&1 || true
+            return 1
+        fi
+        sleep 1
+        if ! ss -lntH | awk '{print $4}' | grep -Eq "(^|:)${NEW_SSH_PORT}$"; then
+            log_error "未检测到 SSH 继续监听端口 ${NEW_SSH_PORT}，正在恢复原配置"
+            [[ "$existed" == "1" ]] && cp -a "$backup_file" "$SSH_DROPIN_FILE" || rm -f "$SSH_DROPIN_FILE"
+            systemctl reload "$SSH_SERVICE" >/dev/null 2>&1 || true
+            return 1
+        fi
+        printf 'SSH_PORT=%q\nSSH_USER=%q\nUPDATED_AT=%q\n' \
+            "$NEW_SSH_PORT" "$target_user" "$(beijing_iso)" > "${APP_STATE_DIR}/ssh.conf"
+        chmod 600 "${APP_STATE_DIR}/ssh.conf"
+        log_success "当前端口未变化且仅密钥登录已生效，已跳过重复连接测试"
+        log_success "SSH 安全配置已完成"
+        return 0
+    fi
 
     if ! schedule_ssh_rollback "$backup_file" "$existed" "$NEW_SSH_PORT" "$rollback_firewall_kind" "$SSH_SERVICE" "$SSH_ROLLBACK_TIMEOUT"; then
         log_error "无法创建 SSH 自动回滚任务，已恢复原配置"

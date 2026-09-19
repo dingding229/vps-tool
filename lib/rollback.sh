@@ -22,7 +22,7 @@ STATE
     systemctl stop "${SSH_ROLLBACK_UNIT}.timer" "${SSH_ROLLBACK_UNIT}.service" >/dev/null 2>&1 || true
     systemctl reset-failed "${SSH_ROLLBACK_UNIT}.service" >/dev/null 2>&1 || true
     systemd-run --unit="$SSH_ROLLBACK_UNIT" --on-active="${timeout}s" \
-        /usr/local/lib/vps-tool/ssh-rollback-action.sh >/dev/null
+        /usr/local/lib/vps-tool/ssh-rollback-action.sh >/dev/null 2>&1
     log_warn "已设置 ${timeout} 秒 SSH 自动回滚保护"
 }
 
