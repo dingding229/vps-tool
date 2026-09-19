@@ -114,3 +114,16 @@ if grep -q 'fail2ban.actions' <<< "$formatted_logs"; then
     exit 1
 fi
 printf 'formatted fail2ban logs: OK\n'
+
+# 工具生成和展示的时间必须统一为北京时间（Asia/Shanghai）。
+[[ "$TZ" == "Asia/Shanghai" ]]
+[[ "$(beijing_datetime '2026-09-19T04:40:12+00:00')" == "2026-09-19 12:40:12" ]]
+[[ "$(beijing_datetime '2026-09-19T12:40:12+08:00')" == "2026-09-19 12:40:12" ]]
+[[ "$(beijing_datetime '2026-09-19 04:40:12' 'UTC')" == "2026-09-19 12:40:12" ]]
+printf 'Beijing time conversion: OK\n'
+
+# 带 UTC 偏移的 Fail2ban 日志必须转换为北京时间后再显示。
+offset_log='2026-09-19T04:40:12+00:00 host fail2ban.actions [1]: NOTICE [sshd] Ban 203.0.113.8'
+offset_view="$(render_fail2ban_logs "$offset_log")"
+grep -q '2026-09-19 12:40:12' <<< "$offset_view"
+printf 'Fail2ban Beijing timestamp: OK\n'

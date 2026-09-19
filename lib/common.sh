@@ -11,6 +11,92 @@ else
     C_BLUE=""; C_MAGENTA=""; C_CYAN=""; C_WHITE=""; BG_BLUE=""
 fi
 
+
+detect_system_timezone() {
+    local detected=""
+    if command -v timedatectl >/dev/null 2>&1; then
+        detected="$(timedatectl show -p Timezone --value 2>/dev/null || true)"
+    fi
+    if [[ -z "$detected" && -r /etc/timezone ]]; then
+        detected="$(head -n 1 /etc/timezone 2>/dev/null || true)"
+    fi
+    if [[ -z "$detected" && -L /etc/localtime ]]; then
+        detected="$(readlink -f /etc/localtime 2>/dev/null || true)"
+        detected="${detected#*/zoneinfo/}"
+    fi
+    [[ -n "$detected" ]] || detected="UTC"
+    printf '%s' "$detected"
+}
+
+# 保存服务器原时区用于解析无偏移量的系统日志；工具自身统一以北京时间显示。
+APP_SOURCE_TIMEZONE="${APP_SOURCE_TIMEZONE:-$(detect_system_timezone)}"
+export APP_SOURCE_TIMEZONE
+export TZ="${APP_TIMEZONE:-Asia/Shanghai}"
+
+beijing_date() {
+    TZ="${APP_TIMEZONE:-Asia/Shanghai}" date "$@"
+}
+
+source_timezone_date() {
+    TZ="${APP_SOURCE_TIMEZONE:-UTC}" date "$@"
+}
+
+beijing_now() {
+    beijing_date '+%Y-%m-%d %H:%M:%S'
+}
+
+beijing_iso() {
+    beijing_date '+%Y-%m-%dT%H:%M:%S%z'
+}
+
+beijing_compact() {
+    beijing_date '+%Y%m%d-%H%M%S'
+}
+
+beijing_datetime() {
+    local input="$1" source_timezone="${2:-${APP_SOURCE_TIMEZONE:-UTC}}"
+    if command -v python3 >/dev/null 2>&1; then
+        python3 - "$input" "${APP_TIMEZONE:-Asia/Shanghai}" "$source_timezone" <<'PY_TIME'
+import datetime as dt
+import re, sys
+from zoneinfo import ZoneInfo
+
+raw, target_name, source_name = sys.argv[1], sys.argv[2], sys.argv[3]
+try:
+    normalized = raw.strip().replace('Z', '+00:00')
+    match = re.match(
+        r'^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})(?:[.,]\d+)?([+-]\d{2}:?\d{2})?$',
+        normalized,
+    )
+    if not match:
+        raise ValueError('unsupported timestamp')
+    date_part, time_part, offset = match.groups()
+    parsed = dt.datetime.strptime(f'{date_part} {time_part}', '%Y-%m-%d %H:%M:%S')
+    if offset:
+        clean = offset if ':' in offset else offset[:3] + ':' + offset[3:]
+        sign = 1 if clean[0] == '+' else -1
+        zone = dt.timezone(sign * dt.timedelta(hours=int(clean[1:3]), minutes=int(clean[4:6])))
+    else:
+        zone = ZoneInfo(source_name)
+    parsed = parsed.replace(tzinfo=zone)
+    print(parsed.astimezone(ZoneInfo(target_name)).strftime('%Y-%m-%d %H:%M:%S'), end='')
+except Exception:
+    print(raw, end='')
+PY_TIME
+    elif date -d '@0' '+%s' >/dev/null 2>&1; then
+        local epoch
+        if [[ "$input" =~ (Z|[+-][0-9]{2}:?[0-9]{2})$ ]]; then
+            epoch="$(date -d "$input" '+%s' 2>/dev/null)" || { printf '%s' "$input"; return; }
+        else
+            epoch="$(TZ="$source_timezone" date -d "$input" '+%s' 2>/dev/null)" \
+                || { printf '%s' "$input"; return; }
+        fi
+        TZ="${APP_TIMEZONE:-Asia/Shanghai}" date -d "@${epoch}" '+%Y-%m-%d %H:%M:%S'
+    else
+        printf '%s' "$input"
+    fi
+}
+
 UI_WIDTH=68
 UI_LABEL_WIDTH=16
 
@@ -126,7 +212,7 @@ ui_header() {
     clear_screen
     title="$(ui_center 'V P S   T O O L' "$UI_WIDTH")"
     tagline="$(ui_center '安全初始化 · 可验证 · 可回滚' "$UI_WIDTH")"
-    metadata="$(ui_center "v${APP_VERSION}  ·  $(date '+%Y-%m-%d %H:%M:%S')" "$UI_WIDTH")"
+    metadata="$(ui_center "v${APP_VERSION}  ·  $(beijing_now)  ${APP_TIMEZONE_LABEL:-北京时间}" "$UI_WIDTH")"
     printf '\n%s%s╭' "$C_BOLD" "$C_CYAN"
     repeat_char '─' "$UI_WIDTH"
     printf '╮\n│%s│\n│%s│\n╰' "$title" "$tagline"
@@ -195,7 +281,7 @@ ui_menu_item() {
 log_line() {
     local level="$1" color="$2" symbol="$3" message="$4"
     local timestamp
-    timestamp="$(date '+%Y-%m-%d %H:%M:%S')"
+    timestamp="$(beijing_now)"
     printf '%s%s %s%s %s\n' "$color" "$symbol" "$level" "$C_RESET" "$message"
     if [[ -n "${APP_LOG_FILE:-}" && -d "$(dirname "$APP_LOG_FILE")" ]]; then
         printf '[%s] [%s] %s\n' "$timestamp" "$level" "$message" >> "$APP_LOG_FILE" 2>/dev/null || true
@@ -225,8 +311,8 @@ confirm() {
         read -r answer || return 1
         answer="${answer:-Y}"
         case "$answer" in
-            Y|y|YES|Yes|yes) return 0 ;;
-            N|n|NO|No|no) return 1 ;;
+            Y|y) return 0 ;;
+            N|n) return 1 ;;
             *) log_warn "请输入 Y 或 N；直接回车默认为 Y" >&2 ;;
         esac
     done
@@ -298,7 +384,7 @@ acquire_lock() {
 
 create_backup_dir() {
     local timestamp path
-    timestamp="$(date '+%Y%m%d-%H%M%S')"
+    timestamp="$(beijing_compact)"
     path="${APP_BACKUP_DIR}/${timestamp}"
     mkdir -p "$path"
     chmod 700 "$path"
@@ -306,7 +392,7 @@ create_backup_dir() {
 }
 
 run_logged() {
-    printf '[%s] [CMD] ' "$(date '+%Y-%m-%d %H:%M:%S')" >> "$APP_LOG_FILE"
+    printf '[%s] [CMD] ' "$(beijing_now)" >> "$APP_LOG_FILE"
     printf '%q ' "$@" >> "$APP_LOG_FILE"
     printf '\n' >> "$APP_LOG_FILE"
     "$@" 2>&1 | tee -a "$APP_LOG_FILE"

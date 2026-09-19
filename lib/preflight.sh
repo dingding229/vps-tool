@@ -60,6 +60,7 @@ show_preflight() {
     ui_kv "当前内核" "$(uname -r)"
     ui_kv "虚拟化" "$(systemd-detect-virt 2>/dev/null || printf 'unknown')"
     ui_kv "当前用户" "$(id -un)"
+    ui_kv "当前时间" "$(beijing_now) ${APP_TIMEZONE_LABEL:-北京时间}"
     if [[ -n "${SSH_CONNECTION:-}" ]]; then
         ui_kv "SSH 会话" "$(ui_expect yes yes)"
     else

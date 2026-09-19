@@ -6,6 +6,9 @@ REPO_NAME="vps-tool"
 REPO_BRANCH="main"
 INSTALL_DIR="/opt/vps-tool"
 ARCHIVE_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}/archive/refs/heads/${REPO_BRANCH}.tar.gz"
+APP_TIMEZONE="Asia/Shanghai"
+export TZ="$APP_TIMEZONE"
+beijing_compact() { TZ="$APP_TIMEZONE" date '+%Y%m%d-%H%M%S'; }
 
 if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
     RESET=$'\033[0m'; BOLD=$'\033[1m'; CYAN=$'\033[36m'; GREEN=$'\033[32m'; RED=$'\033[31m'; YELLOW=$'\033[33m'
@@ -81,7 +84,7 @@ source_dir="$(find "$extract_dir" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
 [[ -n "$source_dir" && -f "${source_dir}/vps-init.sh" ]] || fatal "项目文件不完整"
 
 if [[ -d "$INSTALL_DIR" ]]; then
-    backup_dir="${INSTALL_DIR}.backup.$(date '+%Y%m%d-%H%M%S')"
+    backup_dir="${INSTALL_DIR}.backup.$(beijing_compact)"
     warn "检测到旧版本，将备份到 ${backup_dir}"
     mv "$INSTALL_DIR" "$backup_dir"
 fi

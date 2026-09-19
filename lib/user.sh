@@ -75,10 +75,23 @@ show_generated_private_key() {
 
 
 generate_authorized_key() {
-    local current_port="${1:-22}" key_name key_file group server_ip public_key old_umask
-    key_name="vps-tool-${TARGET_USER}-$(date '+%Y%m%d-%H%M%S')"
-    key_file="${TARGET_HOME}/.ssh/.${key_name}"
-    group="$(id -gn "$TARGET_USER")"
+    local current_port="${1:-22}" validation_mode="${2:-immediate}"
+    local key_name key_file group server_ip public_key old_umask
+    local transfer_user transfer_home
+    key_name="vps-tool-${TARGET_USER}-$(beijing_compact)"
+    transfer_user="$TARGET_USER"
+    transfer_home="$TARGET_HOME"
+    if [[ "$validation_mode" == "deferred" && "$TARGET_USER" == "root" \
+        && -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]] \
+        && id "$SUDO_USER" >/dev/null 2>&1; then
+        transfer_user="$SUDO_USER"
+        transfer_home="$(getent passwd "$transfer_user" | cut -d: -f6)"
+    fi
+    mkdir -p "${transfer_home}/.ssh"
+    group="$(id -gn "$transfer_user")"
+    chown "$transfer_user:$group" "${transfer_home}/.ssh"
+    chmod 700 "${transfer_home}/.ssh"
+    key_file="${transfer_home}/.ssh/.${key_name}"
     server_ip="$(awk '{print $3}' <<< "${SSH_CONNECTION:-}")"
     server_ip="${server_ip:-服务器IP}"
     if [[ "$server_ip" == *:* && "$server_ip" != \[*\] ]]; then
@@ -88,14 +101,14 @@ generate_authorized_key() {
     old_umask="$(umask)"
     umask 077
     if ! ssh-keygen -q -t ed25519 -a 100 -N '' \
-        -C "vps-tool-${TARGET_USER}@$(hostname)-$(date '+%Y-%m-%d')" \
+        -C "vps-tool-${TARGET_USER}@$(hostname)-$(beijing_date '+%Y-%m-%d')" \
         -f "$key_file"; then
         umask "$old_umask"
         log_error "SSH 密钥生成失败"
         return 1
     fi
     umask "$old_umask"
-    chown "$TARGET_USER:$group" "$key_file" "${key_file}.pub"
+    chown "$transfer_user:$group" "$key_file" "${key_file}.pub"
     chmod 600 "$key_file"
     chmod 644 "${key_file}.pub"
     GENERATED_PRIVATE_KEY="$key_file"
@@ -113,7 +126,7 @@ generate_authorized_key() {
     ui_kv "临时私钥" "$key_file"
     printf '\n  %s推荐在本地电脑新开终端下载：%s\n' "$C_BOLD" "$C_RESET"
     printf '  %sscp -P %s %s@%s:%s ~/.ssh/vps-tool-%s%s\n' \
-        "$C_CYAN" "$current_port" "$TARGET_USER" "$server_ip" "$key_file" "$TARGET_USER" "$C_RESET"
+        "$C_CYAN" "$current_port" "$transfer_user" "$server_ip" "$key_file" "$TARGET_USER" "$C_RESET"
     printf '  chmod 600 ~/.ssh/vps-tool-%s\n\n' "$TARGET_USER"
 
     if confirm "是否在当前终端显示私钥" "Y"; then
@@ -121,14 +134,23 @@ generate_authorized_key() {
     fi
 
     while true; do
-        printf '\n%s请在本地使用新密钥测试当前 SSH 端口：%s\n' "$C_YELLOW" "$C_RESET"
-        printf '  ssh -i ~/.ssh/vps-tool-%s -p %s %s@%s\n' \
-            "$TARGET_USER" "$current_port" "$TARGET_USER" "$server_ip"
-        if confirm "是否已经下载私钥并测试登录成功" "Y"; then
-            GENERATED_KEY_CONFIRMED=1
-            cleanup_generated_private_key
-            log_success "服务器端临时私钥已删除，仅保留公钥"
-            return 0
+        if [[ "$validation_mode" == "deferred" ]]; then
+            printf '\n%sroot 登录尚未启用，请先下载并妥善保存私钥；稍后会统一测试登录。%s\n' \
+                "$C_YELLOW" "$C_RESET"
+            if confirm "是否已经下载并保存私钥" "Y"; then
+                log_success "私钥将在 root 登录验证成功后从服务器删除"
+                return 0
+            fi
+        else
+            printf '\n%s请在本地使用新密钥测试当前 SSH 端口：%s\n' "$C_YELLOW" "$C_RESET"
+            printf '  ssh -i ~/.ssh/vps-tool-%s -p %s %s@%s\n' \
+                "$TARGET_USER" "$current_port" "$TARGET_USER" "$server_ip"
+            if confirm "是否已经下载私钥并测试登录成功" "Y"; then
+                GENERATED_KEY_CONFIRMED=1
+                cleanup_generated_private_key
+                log_success "服务器端临时私钥已删除，仅保留公钥"
+                return 0
+            fi
         fi
         if confirm "是否取消本次密钥配置" "Y"; then
             cleanup_generated_private_key
@@ -143,7 +165,7 @@ generate_authorized_key() {
 
 
 ensure_authorized_key() {
-    local target_user="$1" current_port="${2:-22}" key
+    local target_user="$1" current_port="${2:-22}" validation_mode="${3:-immediate}" key
     resolve_target_user "$target_user"
     fix_authorized_keys_permissions
     if has_valid_authorized_key; then
@@ -154,7 +176,7 @@ ensure_authorized_key() {
 
     log_warn "${TARGET_USER} 尚未配置有效 SSH 公钥"
     if confirm "是否自动生成 Ed25519 密钥" "Y"; then
-        generate_authorized_key "$current_port"
+        generate_authorized_key "$current_port" "$validation_mode"
         return $?
     fi
     if ! confirm "是否粘贴已有 SSH 公钥" "Y"; then

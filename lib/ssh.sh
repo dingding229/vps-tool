@@ -37,7 +37,7 @@ write_ssh_dropin() {
     local port="$1" allow_root="$2"
     mkdir -p "$(dirname "$SSH_DROPIN_FILE")"
     cat > "$SSH_DROPIN_FILE" <<EOF_SSH
-# Managed by vps-tool. Generated: $(date -Is)
+# Managed by vps-tool. Generated: $(beijing_iso)
 Port ${port}
 PubkeyAuthentication yes
 PasswordAuthentication no
@@ -160,7 +160,7 @@ configure_ssh_interactive() {
             firewall_remove_ssh_port "$CURRENT_SSH_PORT"
         fi
         printf 'SSH_PORT=%q\nSSH_USER=%q\nUPDATED_AT=%q\n' \
-            "$NEW_SSH_PORT" "$target_user" "$(date -Is)" > "${APP_STATE_DIR}/ssh.conf"
+            "$NEW_SSH_PORT" "$target_user" "$(beijing_iso)" > "${APP_STATE_DIR}/ssh.conf"
         chmod 600 "${APP_STATE_DIR}/ssh.conf"
         log_success "SSH 安全配置已完成"
         return 0
@@ -175,18 +175,29 @@ configure_ssh_interactive() {
 show_ssh_status() {
     ssh_service_name
     detect_current_ssh_port
-    local cfg service_state pubkey password interactive root_login
+    local cfg root_cfg service_state pubkey password interactive
+    local root_login root_password root_pubkey root_methods
     service_state="$(systemctl is-active "$SSH_SERVICE" 2>/dev/null || true)"
     cfg="$(sshd -T 2>/dev/null || true)"
+    root_cfg="$(root_effective_config 2>/dev/null || true)"
     pubkey="$(awk '$1=="pubkeyauthentication" {print $2; exit}' <<< "$cfg")"
     password="$(awk '$1=="passwordauthentication" {print $2; exit}' <<< "$cfg")"
     interactive="$(awk '$1=="kbdinteractiveauthentication" {print $2; exit}' <<< "$cfg")"
-    root_login="$(awk '$1=="permitrootlogin" {print $2; exit}' <<< "$cfg")"
+    root_login="$(awk '$1=="permitrootlogin" {print $2; exit}' <<< "$root_cfg")"
+    root_password="$(awk '$1=="passwordauthentication" {print $2; exit}' <<< "$root_cfg")"
+    root_pubkey="$(awk '$1=="pubkeyauthentication" {print $2; exit}' <<< "$root_cfg")"
+    root_methods="$(awk '$1=="authenticationmethods" {print $2; exit}' <<< "$root_cfg")"
 
     ui_kv "SSH 服务" "$(ui_state "$service_state")"
     ui_kv "有效端口" "${C_BOLD}${C_CYAN}${CURRENT_SSH_PORT}${C_RESET}"
-    ui_kv "公钥认证" "$(ui_expect "${pubkey:-unknown}" yes)"
-    ui_kv "密码认证" "$(ui_expect "${password:-unknown}" no)"
+    ui_kv "普通用户公钥" "$(ui_expect "${pubkey:-unknown}" yes)"
+    ui_kv "普通用户密码" "$(ui_expect "${password:-unknown}" no)"
     ui_kv "交互式认证" "$(ui_expect "${interactive:-unknown}" no)"
+    ui_kv "root 账户" "$(root_account_status_label)"
+    ui_kv "root 登录 Shell" "$(root_login_shell)"
     ui_kv "root 登录策略" "${root_login:-unknown}"
+    ui_kv "root 公钥认证" "${root_pubkey:-unknown}"
+    ui_kv "root 密码认证" "${root_password:-unknown}"
+    ui_kv "root 认证组合" "${root_methods:-unknown}"
+    ui_kv "root 专用配置" "$(root_access_override_status)"
 }

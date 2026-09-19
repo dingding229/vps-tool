@@ -23,7 +23,7 @@ fail2ban_log_header() {
         local header description_width
         description_width=$((UI_WIDTH - 75))
         (( description_width < 20 )) && description_width=20
-        header="$(ui_columns "时间" 19 "事件" 10 "Jail" 10 "IP / 对象" 24 "说明" "$description_width")"
+        header="$(ui_columns "北京时间" 19 "事件" 10 "Jail" 10 "IP / 对象" 24 "说明" "$description_width")"
         printf '  %s%s%s
 ' "$C_BOLD" "$header" "$C_RESET"
         printf '  %s' "$C_DIM"
@@ -31,7 +31,7 @@ fail2ban_log_header() {
         printf '%s
 ' "$C_RESET"
     else
-        printf '  %s按时间顺序显示安全事件%s
+        printf '  %s按北京时间顺序显示安全事件%s
 ' "$C_BOLD" "$C_RESET"
     fi
     printf '  %s红色：封禁 / 恢复封禁 / 异常%s
@@ -50,15 +50,18 @@ fail2ban_clean_message() {
 }
 
 fail2ban_extract_timestamp() {
-    local line="$1"
-    if [[ "$line" =~ ^([0-9]{4}-[0-9]{2}-[0-9]{2})[[:space:]]+([0-9]{2}:[0-9]{2}:[0-9]{2}) ]]; then
-        printf '%s %s' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
-    elif [[ "$line" =~ ^([0-9]{4}-[0-9]{2}-[0-9]{2})T([0-9]{2}:[0-9]{2}:[0-9]{2}) ]]; then
-        printf '%s %s' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+    local line="$1" raw_timestamp
+    if [[ "$line" =~ ^([0-9]{4}-[0-9]{2}-[0-9]{2})T([0-9]{2}:[0-9]{2}:[0-9]{2})([.,][0-9]+)?([+-][0-9]{2}:?[0-9]{2}|Z)? ]]; then
+        raw_timestamp="${BASH_REMATCH[1]}T${BASH_REMATCH[2]}${BASH_REMATCH[4]}"
+        beijing_datetime "$raw_timestamp"
+    elif [[ "$line" =~ ^([0-9]{4}-[0-9]{2}-[0-9]{2})[[:space:]]+([0-9]{2}:[0-9]{2}:[0-9]{2}) ]]; then
+        raw_timestamp="${BASH_REMATCH[1]} ${BASH_REMATCH[2]}"
+        beijing_datetime "$raw_timestamp"
     else
         printf '%s' '--'
     fi
 }
+
 
 fail2ban_extract_message() {
     local line="$1" message
@@ -192,7 +195,7 @@ read_recent_fail2ban_logs() {
     local lines="$1"
     case "$FAIL2BAN_LOG_SOURCE" in
         file) tail -n "$lines" "$FAIL2BAN_LOG_FILE" ;;
-        journal) journalctl -u fail2ban --no-pager -n "$lines" -o short-iso ;;
+        journal) journalctl -u fail2ban --utc --no-pager -n "$lines" -o short-iso ;;
     esac
 }
 
@@ -211,7 +214,7 @@ follow_fail2ban_logs() {
     fail2ban_log_header
     case "$FAIL2BAN_LOG_SOURCE" in
         file) tail -n 30 -F "$FAIL2BAN_LOG_FILE" | format_fail2ban_stream ;;
-        journal) journalctl -u fail2ban -n 30 -f -o short-iso | format_fail2ban_stream ;;
+        journal) journalctl -u fail2ban --utc -n 30 -f -o short-iso | format_fail2ban_stream ;;
     esac
 }
 
@@ -236,7 +239,7 @@ search_fail2ban_ip() {
         file)
             raw="$({ zgrep -h -F -- "$ip" "${FAIL2BAN_LOG_FILE}".*.gz 2>/dev/null || true; grep -F -- "$ip" "$FAIL2BAN_LOG_FILE" || true; })"
             ;;
-        journal) raw="$(journalctl -u fail2ban --no-pager -o short-iso | grep -F -- "$ip" || true)" ;;
+        journal) raw="$(journalctl -u fail2ban --utc --no-pager -o short-iso | grep -F -- "$ip" || true)" ;;
     esac
     render_fail2ban_logs "$raw"
 }
@@ -247,10 +250,10 @@ show_logs_since() {
     detect_fail2ban_log_source || { log_warn "找不到 Fail2ban 日志"; return 1; }
     case "$FAIL2BAN_LOG_SOURCE" in
         journal)
-            raw="$(journalctl -u fail2ban --since "$since" --no-pager -o short-iso)"
+            raw="$(journalctl -u fail2ban --utc --since "$since" --no-pager -o short-iso)"
             ;;
         file)
-            cutoff="$(date -d "$since" '+%Y-%m-%d %H:%M:%S' 2>/dev/null)" \
+            cutoff="$(source_timezone_date -d "$since" '+%Y-%m-%d %H:%M:%S' 2>/dev/null)" \
                 || { log_warn "无法解析时间范围：${since}"; return 1; }
             raw="$({ [[ -r "${FAIL2BAN_LOG_FILE}.1" ]] && cat "${FAIL2BAN_LOG_FILE}.1"; cat "$FAIL2BAN_LOG_FILE"; } \
                 | awk -v cutoff="$cutoff" 'length($1) >= 10 && ($1 " " $2) >= cutoff')"

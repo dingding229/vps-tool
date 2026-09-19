@@ -18,7 +18,7 @@ write_fail2ban_config() {
     mkdir -p /etc/fail2ban/jail.d /etc/fail2ban/fail2ban.d
 
     cat > "$FAIL2BAN_JAIL_FILE" <<EOF_JAIL
-# Managed by vps-tool. Generated: $(date -Is)
+# Managed by vps-tool. Generated: $(beijing_iso)
 [DEFAULT]
 bantime = ${bantime}
 findtime = ${findtime}
@@ -90,7 +90,13 @@ configure_fail2ban_interactive() {
     systemctl enable --now fail2ban >> "$APP_LOG_FILE" 2>&1
     systemctl restart fail2ban >> "$APP_LOG_FILE" 2>&1
     sleep 2
-    service_active fail2ban || { log_error "Fail2ban 启动失败"; journalctl -u fail2ban -n 20 --no-pager; return 1; }
+    if ! service_active fail2ban; then
+        local failure_logs
+        log_error "Fail2ban 启动失败"
+        failure_logs="$(journalctl -u fail2ban --utc -n 20 --no-pager -o short-iso 2>/dev/null || true)"
+        render_fail2ban_logs "$failure_logs"
+        return 1
+    fi
     fail2ban-client status sshd >/dev/null 2>&1 || { log_error "sshd jail 未成功启用"; return 1; }
 
     cat > "${APP_STATE_DIR}/fail2ban.conf" <<EOF_STATE
@@ -99,7 +105,7 @@ MAXRETRY=$(printf '%q' "$maxretry")
 FINDTIME=$(printf '%q' "$findtime")
 BANTIME=$(printf '%q' "$bantime")
 LOG_RETENTION_DAYS=$(printf '%q' "$retention")
-UPDATED_AT=$(printf '%q' "$(date -Is)")
+UPDATED_AT=$(printf '%q' "$(beijing_iso)")
 EOF_STATE
     chmod 600 "${APP_STATE_DIR}/fail2ban.conf"
     log_success "Fail2ban 已启用，sshd jail 正常运行"

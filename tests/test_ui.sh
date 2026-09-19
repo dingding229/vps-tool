@@ -33,6 +33,7 @@ layout="$(
 )"
 grep -q '^01  运行环境$' <<< "$layout"
 grep -q '^02  SSH 安全$' <<< "$layout"
+grep -q '北京时间' <<< "$layout"
 
 # Fail2ban 状态必须格式化，不能泄漏 fail2ban-client 原始 Status 树。
 mock_dir="$(mktemp -d)"

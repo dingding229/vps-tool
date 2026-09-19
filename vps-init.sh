@@ -4,13 +4,17 @@ set -Euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/config/defaults.conf"
-for module in common preflight firewall user rollback ssh logrotate fail2ban fail2ban-log bbr verify status menu; do
+for module in common preflight firewall user rollback ssh root-login logrotate fail2ban fail2ban-log bbr verify status menu; do
     # shellcheck disable=SC1090
     source "${SCRIPT_DIR}/lib/${module}.sh"
 done
 
-# 自动生成的私钥仅在用户完成下载和测试前临时保留。
-trap cleanup_generated_private_key EXIT
+# 自动生成的私钥仅在用户完成下载和测试前临时保留；未完成的 root 配置自动恢复。
+cleanup_vps_tool_session() {
+    cleanup_pending_root_login
+    cleanup_generated_private_key
+}
+trap cleanup_vps_tool_session EXIT
 
 
 usage() {
@@ -25,6 +29,7 @@ ${APP_NAME} ${APP_VERSION}
   --status            查看系统状态
   --verify            验证配置
   --fail2ban-logs     进入 Fail2ban 日志中心
+  --enable-root       启用 root SSH 登录
   --rollback          立即执行待处理 SSH 回滚
   --no-clear          不清理终端画面
   --help              显示帮助
@@ -47,6 +52,7 @@ main() {
         --status) show_full_status ;;
         --verify) verify_system ;;
         --fail2ban-logs) fail2ban_log_menu ;;
+        --enable-root) enable_root_login_interactive ;;
         --rollback) run_ssh_rollback_now ;;
         --no-clear) export VPS_TOOL_NO_CLEAR=1; main_menu ;;
         --help|-h) usage ;;

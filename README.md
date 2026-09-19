@@ -1,6 +1,6 @@
 # VPS Tool
 
-VPS 到手后的一键初始化脚本（第一版）。使用 Shell 编写，提供美化交互界面。
+VPS 到手后的一键初始化脚本。当前版本 `v0.3.0`，使用 Shell 编写，提供美化交互界面。
 
 ## 交互界面
 
@@ -8,7 +8,8 @@ VPS 到手后的一键初始化脚本（第一版）。使用 Shell 编写，提
 - 中文标签按终端显示宽度对齐，不再使用按字节计算的 `printf %-Ns`；
 - 主菜单和日志菜单按照“配置 → 监控 → 验证 → 恢复”分组；
 - 窄终端使用紧凑的双行安全事件布局，宽终端自动切换为表格；
-- Fail2ban 状态会解析成结构化指标，不再混入原始 Status 树。
+- Fail2ban 状态会解析成结构化指标，不再混入原始 Status 树；
+- 所有页面、工具日志、备份名和状态时间统一显示为北京时间（`Asia/Shanghai`）。
 
 ## 第一版功能
 
@@ -17,9 +18,12 @@ VPS 到手后的一键初始化脚本（第一版）。使用 Shell 编写，提
 - 修改 SSH 登录端口
 - 自动检测并放行 UFW / firewalld 端口
 - SSH 配置语法验证和临时自动回滚，降低锁死风险
+- 为默认禁用 root 的 VPS 单独启用 root SSH 登录，推荐仅密钥，也可选择仅对 root 开放密码认证
+- root 登录启用前自动备份 SSH 配置、root 密码状态、登录 Shell 和 `authorized_keys`，测试失败可完整恢复
 - 安装和配置 Fail2ban
 - 从脚本查看格式化的 Fail2ban 最近日志、实时日志、Ban/Unban、IP 查询
 - Fail2ban 日志按事件、Jail 和 IP 分栏显示，封禁/恢复封禁/异常使用红色重点标记
+- Fail2ban 文件日志和 systemd journal 时间统一转换为北京时间后显示
 - 查看当前 Jail 和封禁 IP
 - 从脚本解封 IP
 - 配置 Fail2ban 和工具自身的 logrotate 清理策略
@@ -99,9 +103,43 @@ sudo vps-tool --verify
 # 查看 Fail2ban 日志
 sudo vps-tool --fail2ban-logs
 
+# 启用 root SSH 登录
+sudo vps-tool --enable-root
+
 # 执行待处理的 SSH 回滚
 sudo vps-tool --rollback
 ```
+
+
+## 启用 root SSH 登录
+
+主菜单选择“启用 root SSH 登录”，或执行：
+
+```bash
+sudo vps-tool --enable-root
+```
+
+流程支持两种模式：
+
+1. **仅密钥登录（默认且推荐）**：优先复用当前 sudo 用户的公钥；没有公钥时自动生成 Ed25519 密钥。若 root 账户被锁定，脚本会使用随机强密码解锁账户并立即丢弃该密码，同时保持 SSH 密码认证关闭。
+2. **密码或密钥登录**：交互设置 root 强密码，只对 root 用户启用密码认证，不改变普通用户的仅密钥策略。建议先安装 Fail2ban。
+
+脚本会把 root 专用规则作为 SSH 主配置的第一条 `Include` 加载，并使用 `sshd -t` 与 `sshd -T -C user=root,...` 验证实际生效参数。应用后必须在另一终端测试 root 登录；选择 `N` 时会恢复：
+
+- `/etc/ssh/sshd_config`；
+- root 专用 SSH 配置；
+- root 原密码哈希和密码状态；
+- root 原登录 Shell；
+- root 原 `authorized_keys`。
+
+如果系统配置了 `AllowUsers`、`DenyUsers`、`AllowGroups` 或 `DenyGroups`，脚本会提示这些访问控制仍可能阻止 root，最终以实际登录测试为准。
+
+## 时间显示
+
+- 脚本进程统一使用 `Asia/Shanghai`，所有工具生成的时间、页面标题、运行日志、配置时间和备份目录名均为北京时间；
+- 读取 Fail2ban systemd journal 时先使用 UTC 带偏移时间，再转换为北京时间；
+- 读取无时区偏移的 `/var/log/fail2ban.log` 时，先按服务器原时区解释，再转换为北京时间；
+- 脚本不会修改服务器系统时区。
 
 ## 自动生成 SSH 密钥
 
@@ -116,7 +154,8 @@ sudo vps-tool --rollback
 
 ## 注意事项
 
-- 脚本不会长期保存自动生成的私钥，也不会保存密码。
+- 脚本不会长期保存自动生成的私钥，也不会保存明文密码。
+- 启用 root 密码登录的风险高于仅密钥登录；默认选项始终是仅密钥模式。
 - BBRv3 安装器来自上游 GitHub，执行前会先下载到临时文件并记录日志。
 - Fail2ban 日志可能来自 `/var/log/fail2ban.log` 或 systemd journal，脚本会自动检测。
 - 日志查看和解封功能需要 root 权限。

@@ -14,7 +14,25 @@ verify_ssh() {
     ui_kv "公钥认证" "$(ui_expect "${pubkey:-unknown}" yes)"
     ui_kv "密码认证" "$(ui_expect "${password:-unknown}" no)"
     ui_kv "交互式认证" "$(ui_expect "${interactive:-unknown}" no)"
+    if [[ -r "${APP_STATE_DIR}/root-login.conf" ]]; then
+        if verify_root_login; then
+            ui_kv "root 登录验证" "${C_GREEN}✔ 专用策略正常${C_RESET}"
+        else
+            ui_kv "root 登录验证" "${C_RED}✖ 专用策略异常${C_RESET}"
+            return 1
+        fi
+    else
+        ui_kv "root 登录验证" "${C_DIM}未由工具启用${C_RESET}"
+    fi
     [[ "$password" == no && "$pubkey" == yes && "$interactive" == no ]]
+}
+
+verify_root_login() {
+    local state_file="${APP_STATE_DIR}/root-login.conf" mode
+    [[ -r "$state_file" ]] || return 2
+    mode="$(awk -F= '$1=="MODE" {gsub(/^'"'"'|'"'"'$/, "", $2); print $2; exit}' "$state_file")"
+    [[ "$mode" == "key" || "$mode" == "password" ]] || return 1
+    verify_root_access_config "$mode"
 }
 
 verify_fail2ban() {

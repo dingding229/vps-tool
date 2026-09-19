@@ -50,7 +50,7 @@ install_bbr_interactive() {
     fi
     log_success "安装器已下载，日志将写入 ${APP_LOG_FILE}"
 
-    if ! bash "$installer" 2>&1 | tee -a "$APP_LOG_FILE"; then
+    if ! TZ="${APP_TIMEZONE:-Asia/Shanghai}" bash "$installer" 2>&1 | tee -a "$APP_LOG_FILE"; then
         log_error "BBRv3 安装器执行失败，详情见 ${APP_LOG_FILE}"
         rm -rf "$temp_dir"
         return 1
@@ -58,7 +58,7 @@ install_bbr_interactive() {
     rm -rf "$temp_dir"
     trap - INT TERM
     printf 'BBR_INSTALL_REQUESTED=yes\nREBOOT_REQUIRED=yes\nUPDATED_AT=%q\n' \
-        "$(date -Is)" > "${APP_STATE_DIR}/bbr.conf"
+        "$(beijing_iso)" > "${APP_STATE_DIR}/bbr.conf"
     chmod 600 "${APP_STATE_DIR}/bbr.conf"
     log_success "BBRv3 安装流程结束；请根据上游安装器提示重启服务器"
 }

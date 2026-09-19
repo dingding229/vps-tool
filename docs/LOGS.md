@@ -6,7 +6,7 @@
 sudo bash scripts/fail2ban-log.sh
 ```
 
-日志不会直接输出 Fail2ban 原始文本，而是格式化为：时间、事件、Jail、IP/对象和说明。窄终端使用易读的双行事件卡片，宽终端自动切换为对齐表格。
+日志不会直接输出 Fail2ban 原始文本，而是格式化为：时间、事件、Jail、IP/对象和说明。窄终端使用易读的双行事件卡片，宽终端自动切换为对齐表格。所有事件时间都会转换为北京时间（`Asia/Shanghai`）后显示。
 
 颜色规则：
 
@@ -27,4 +27,4 @@ sudo bash scripts/fail2ban-log.sh
 - 查看当前封禁 IP
 - 解封 IP
 
-脚本优先读取 `/var/log/fail2ban.log`，不存在时回退到 `journalctl -u fail2ban`。
+脚本优先读取 `/var/log/fail2ban.log`，不存在时回退到 `journalctl -u fail2ban`。文件日志按服务器原时区解析；journal 使用带 UTC 偏移的时间读取，然后统一转换为北京时间。
