@@ -1,16 +1,17 @@
 # VPS Tool
 
-VPS 到手后的一键初始化脚本。当前版本 `v0.5.1`，使用 Shell 编写，提供美化交互界面。
+VPS 到手后的一键初始化脚本。当前版本 `v0.6.0`，使用 Shell 编写，提供美化交互界面。
 
 ## 交互界面
 
-- 页面采用统一的编号区块顺序：环境、SSH、Fail2ban、vnStat、网络加速、文件与备份；
+- 页面采用统一的编号区块顺序：环境、APT、SSH、Fail2ban、vnStat、网络加速、工具更新、文件与备份；
 - 主菜单按“快速开始 → SSH 与登录 → 访问防护 → 网络与流量 → 系统维护”排列，相近功能保持在同一区域；
 - 中文标签按终端显示宽度对齐，不再使用按字节计算的 `printf %-Ns`；
 - 主菜单和日志菜单按照“配置 → 监控 → 检查 → 恢复”分组；
 - 窄终端使用紧凑的双行安全事件布局，宽终端自动切换为表格；
 - Fail2ban 状态会解析成结构化指标，不再混入原始 Status 树；
 - 所有页面、工具日志、备份名和状态时间统一显示为北京时间（`Asia/Shanghai`）。
+- 正常启动时先刷新 APT 索引并检查可升级软件包，再进入 VPS Tool 功能；
 - 每次运行会检查 GitHub `main` 分支版本；发现新版本时自动替换程序文件并重新进入原操作。
 
 ## 功能概览
@@ -36,6 +37,7 @@ VPS 到手后的一键初始化脚本。当前版本 `v0.5.1`，使用 Shell 编
 - vnStat 数据统一转换为 KiB / MiB / GiB / TiB，并以中文表格展示，不直接返回原始 JSON
 - vnStat 时间戳统一转换为北京时间，支持切换默认查询接口
 - 调用 [Actions-bbr-v3](https://github.com/byJoey/Actions-bbr-v3)
+- 启动前自动执行 `apt-get update` 并检查系统软件包是否为最新；发现更新时以 Y/N 交互确认是否升级
 - 启动时自动检查并安装 VPS Tool 新版本，更新失败不会阻止现有功能继续运行
 - 系统状态和最终配置检查
 
@@ -123,10 +125,40 @@ sudo vps-tool --enable-root
 # 执行待处理的 SSH 回滚
 sudo vps-tool --rollback
 
-# 手动检查并安装更新
+# 检查并升级 APT 软件包
+sudo vps-tool --apt
+
+# 手动检查并安装 VPS Tool 更新
 sudo vps-tool --update
 ```
 
+
+## APT 启动检查
+
+正常运行脚本时会在进入目标功能前检查系统软件包状态：
+
+1. 执行 `apt-get update` 刷新软件包索引；
+2. 使用模拟升级读取可升级数量，不直接展示冗长的 APT 原始输出；
+3. 在交互终端发现更新时，格式化展示前 8 个软件包，并询问是否升级；
+4. 确认问题仅接受 `Y/N`，直接回车默认 `Y`；
+5. 使用 `apt-get upgrade --with-new-pkgs -y` 执行常规升级；如果仍有需要单独处理的软件包，会在结果中提示；
+6. 检测到 `/var/run/reboot-required` 时提示重启服务器。
+
+APT 网络或索引检查失败不会阻止 SSH 回滚及其他 VPS Tool 功能。非交互环境只检查并记录状态，不会自动执行系统升级。SSH 紧急回滚、APT 手动更新和工具自更新流程会跳过重复的启动检查。
+
+手动打开完整的 APT 更新页面：
+
+```bash
+sudo vps-tool --apt
+```
+
+临时跳过一次启动检查：
+
+```bash
+sudo VPS_TOOL_SKIP_APT_CHECK=1 vps-tool
+```
+
+最近一次检查结果会记录在 `/var/lib/vps-tool/apt.conf`，并显示在“系统状态总览”的“系统软件 / APT”区块中。所有检查时间均显示为北京时间。
 
 ## 自动更新
 
@@ -217,6 +249,7 @@ sudo vps-tool --enable-root
 
 - 脚本不会长期保存自动生成的私钥，也不会保存明文密码。
 - 启用 root 密码登录的风险高于仅密钥登录；默认选项始终是仅密钥模式。
+- APT 升级采用常规 `upgrade --with-new-pkgs`，不会自动执行发行版升级，也不会自动删除软件包。
 - BBRv3 安装器来自上游 GitHub，执行前会先下载到临时文件并记录日志。
 - Fail2ban 日志可能来自 `/var/log/fail2ban.log` 或 systemd journal，脚本会自动检测。
 - vnStat 统计依赖后台持续采集；重装前如需保留历史数据，请自行备份 `/var/lib/vnstat/`。

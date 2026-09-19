@@ -6,22 +6,25 @@ show_full_status() {
 
     show_preflight "01"
 
-    ui_section "02" "SSH 安全"
+    ui_section "02" "系统软件 / APT"
+    print_apt_status
+
+    ui_section "03" "SSH 安全"
     show_ssh_status
 
-    ui_section "03" "Fail2ban 防护"
+    ui_section "04" "Fail2ban 防护"
     print_fail2ban_status || true
 
-    ui_section "04" "vnStat 流量监控"
+    ui_section "05" "vnStat 流量监控"
     print_vnstat_status || true
 
-    ui_section "05" "网络加速"
+    ui_section "06" "网络加速"
     show_bbr_status
 
-    ui_section "06" "VPS Tool 更新"
+    ui_section "07" "VPS Tool 更新"
     print_update_status
 
-    ui_section "07" "文件与备份"
+    ui_section "08" "文件与备份"
     ui_kv "安装日志" "$APP_LOG_FILE"
     ui_kv "备份目录" "$APP_BACKUP_DIR"
     ui_kv "配置目录" "$APP_ETC_DIR"

@@ -6,6 +6,7 @@ export NO_COLOR=1 VPS_TOOL_NO_CLEAR=1
 SCRIPT_DIR="$ROOT_DIR"
 source config/defaults.conf
 source lib/common.sh
+source lib/apt.sh
 source lib/preflight.sh
 source lib/ssh.sh
 source lib/fail2ban.sh
@@ -99,11 +100,43 @@ for phrase in ("第一" + "版", "测试" + "版", "安装或" + "修复"):
     assert phrase not in text
 line9 = next(line for line in text.splitlines() if "[9]" in line)
 line10 = next(line for line in text.splitlines() if "[10]" in line)
+line11 = next(line for line in text.splitlines() if "[11]" in line)
+line12 = next(line for line in text.splitlines() if "[12]" in line)
 assert line9.index("查看系统状态") == line10.index("检查系统配置")
+assert line10.index("检查系统配置") == line11.index("APT 软件包更新")
+assert line11.index("APT 软件包更新") == line12.index("检查 VPS Tool 更新")
 PY_MENU
 grep -q '执行 SSH 配置回滚' <<< "$main_menu_view"
 grep -q 'vnStat 流量中心' <<< "$main_menu_view"
+grep -q 'APT 软件包更新' <<< "$main_menu_view"
 grep -q '检查 VPS Tool 更新' <<< "$main_menu_view"
 printf 'main menu grouping: OK\n'
+
+# 系统状态页按“环境 → APT → SSH → 防护 → 流量 → 网络 → 更新 → 文件”排列。
+show_preflight() { ui_section "$1" "运行环境"; }
+print_apt_status() { ui_kv "APT 状态" "✔ 已是最新版本"; }
+show_ssh_status() { :; }
+print_fail2ban_status() { :; }
+print_vnstat_status() { :; }
+show_bbr_status() { :; }
+print_update_status() { :; }
+status_view="$(show_full_status)"
+python3 - "$status_view" <<'PY_STATUS'
+import sys
+text = sys.argv[1]
+labels = [
+    "01  运行环境",
+    "02  系统软件 / APT",
+    "03  SSH 安全",
+    "04  Fail2ban 防护",
+    "05  vnStat 流量监控",
+    "06  网络加速",
+    "07  VPS Tool 更新",
+    "08  文件与备份",
+]
+positions = [text.index(label) for label in labels]
+assert positions == sorted(positions)
+PY_STATUS
+printf 'status page ordering: OK\n'
 
 printf 'ui layout tests: OK\n'

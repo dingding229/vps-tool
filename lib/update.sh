@@ -123,6 +123,7 @@ install_remote_update() {
         || ! -f "${source_dir}/install.sh" \
         || ! -f "${source_dir}/config/defaults.conf" \
         || ! -f "${source_dir}/lib/common.sh" \
+        || ! -f "${source_dir}/lib/apt.sh" \
         || ! -f "${source_dir}/lib/update.sh" \
         || ! -d "${source_dir}/scripts" ]]; then
         log_warn "更新包文件不完整，继续使用当前版本"
@@ -216,6 +217,7 @@ auto_update_if_available() {
     install_remote_update "$latest" || return 0
 
     export VPS_TOOL_SKIP_UPDATE=1
+    export VPS_TOOL_SKIP_APT_CHECK=1
     export VPS_TOOL_UPDATED_FROM="$APP_VERSION"
     exec bash "${SCRIPT_DIR}/vps-init.sh" "$@"
 }
@@ -242,6 +244,7 @@ update_now_interactive() {
             confirm "是否立即更新" "Y" || { log_warn "已取消更新"; return 0; }
             if install_remote_update "$latest"; then
                 export VPS_TOOL_SKIP_UPDATE=1
+                export VPS_TOOL_SKIP_APT_CHECK=1
                 export VPS_TOOL_UPDATED_FROM="$APP_VERSION"
                 exec bash "${SCRIPT_DIR}/vps-init.sh" --interactive
             fi

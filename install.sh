@@ -93,6 +93,7 @@ source_dir="$(find "$extract_dir" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
     && -f "${source_dir}/install.sh" \
     && -f "${source_dir}/config/defaults.conf" \
     && -f "${source_dir}/lib/common.sh" \
+    && -f "${source_dir}/lib/apt.sh" \
     && -d "${source_dir}/scripts" ]] || fatal "项目文件不完整"
 find "$source_dir" -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n \
     || fatal "项目脚本检查未通过"
