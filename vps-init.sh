@@ -68,7 +68,12 @@ main() {
     acquire_lock
     cleanup_retained_update_directories
     local requested_action="${1:---interactive}"
+    resume_bbr_after_reboot
+    if [[ "$requested_action" != "--bbr-resume" ]]; then
+        notify_bbr_resume_result
+    fi
     if [[ "${VPS_TOOL_SKIP_APT_CHECK:-0}" != "1" \
+        && "$requested_action" != "--bbr-resume" \
         && "$requested_action" != "--rollback" \
         && "$requested_action" != "--update" \
         && "$requested_action" != "--apt" ]]; then
@@ -77,7 +82,8 @@ main() {
     if [[ "${UPDATE_ENABLED:-yes}" == "yes" \
         && "${VPS_TOOL_SKIP_UPDATE:-0}" != "1" \
         && "$requested_action" != "--update" \
-        && "$requested_action" != "--rollback" ]]; then
+        && "$requested_action" != "--rollback" \
+        && "$requested_action" != "--bbr-resume" ]]; then
         auto_update_if_available "$@"
     elif [[ -n "${VPS_TOOL_UPDATED_FROM:-}" ]]; then
         log_success "当前运行版本：v${APP_VERSION}"
@@ -93,6 +99,7 @@ main() {
         --rollback) run_ssh_rollback_now ;;
         --update) update_now_interactive ;;
         --apt) manage_apt_interactive ;;
+        --bbr-resume) : ;;
         --no-clear) export VPS_TOOL_NO_CLEAR=1; main_menu ;;
         --help|-h) usage ;;
         *) usage; return 2 ;;

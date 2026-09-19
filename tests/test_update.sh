@@ -43,9 +43,10 @@ printf 'old\n' > "${fake_install}/old-marker"
 printf '#!/usr/bin/env bash\n' > "${fake_install}/vps-init.sh"
 printf '#!/usr/bin/env bash\necho new\n' > "${payload}/vps-init.sh"
 printf '#!/usr/bin/env bash\n' > "${payload}/install.sh"
-printf 'APP_VERSION="0.6.1"\n' > "${payload}/config/defaults.conf"
+printf 'APP_VERSION="0.7.1"\n' > "${payload}/config/defaults.conf"
 printf '#!/usr/bin/env bash\n' > "${payload}/lib/common.sh"
 printf '#!/usr/bin/env bash\n' > "${payload}/lib/apt.sh"
+printf '#!/usr/bin/env bash\n' > "${payload}/lib/bbr.sh"
 printf '#!/usr/bin/env bash\n' > "${payload}/lib/update.sh"
 printf '#!/usr/bin/env bash\n' > "${payload}/scripts/status.sh"
 archive="${temp_dir}/update.tar.gz"
@@ -69,23 +70,23 @@ curl() {
     if [[ -n "$output" ]]; then
         cp "$MOCK_ARCHIVE" "$output"
     else
-        printf 'APP_VERSION="0.6.1"\n'
+        printf 'APP_VERSION="0.7.1"\n'
     fi
 }
 
-[[ "$(read_remote_app_version)" == '0.6.1' ]]
+[[ "$(read_remote_app_version)" == '0.7.1' ]]
 check_result=0
 check_for_updates auto || check_result=$?
 [[ "$check_result" == "10" ]]
-[[ "$UPDATE_AVAILABLE_VERSION" == "0.6.1" ]]
+[[ "$UPDATE_AVAILABLE_VERSION" == "0.7.1" ]]
 grep -q '^STATUS=available$' "$UPDATE_STATE_FILE"
-install_remote_update '0.6.1'
-grep -q 'APP_VERSION="0.6.1"' "${fake_install}/config/defaults.conf"
+install_remote_update '0.7.1'
+grep -q 'APP_VERSION="0.7.1"' "${fake_install}/config/defaults.conf"
 [[ -x "${fake_install}/vps-init.sh" ]]
 [[ ! -e "${fake_install}/old-marker" ]]
 [[ -z "$(find "$temp_dir" -maxdepth 2 -type d \( -name 'vps-tool.backup.*' -o -name 'previous' -o -name 'previous-install' \) -print -quit)" ]]
 grep -q '^STATUS=updated$' "$UPDATE_STATE_FILE"
-grep -q '^CURRENT_VERSION=0.6.1$' "$UPDATE_STATE_FILE"
+grep -q '^CURRENT_VERSION=0.7.1$' "$UPDATE_STATE_FILE"
 printf 'atomic update without retained backup: OK\n'
 
 if grep -q 'backup_dir=' install.sh lib/update.sh; then

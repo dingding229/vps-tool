@@ -83,6 +83,17 @@ verify_system() {
 
     ui_section "04" "BBR / 内核检查"
     show_bbr_status
+    local bbr_workflow
+    bbr_workflow="$(read_bbr_state_value STATUS 2>/dev/null || true)"
+    if bbr_runtime_active; then
+        log_success "BBRv3 内核和拥塞控制算法已生效"
+    elif [[ "$bbr_workflow" == "pending_reboot" || "$bbr_workflow" == "installing" ]]; then
+        log_warn "BBRv3 正在等待服务器重启和自动恢复检查"
+    elif [[ "$bbr_workflow" == "verification_failed" ]]; then
+        log_error "BBRv3 重启后验证未通过"
+    else
+        log_warn "BBRv3 尚未生效"
+    fi
 
     ui_section "05" "回滚保护"
     if [[ -f "$SSH_ROLLBACK_STATE" ]]; then

@@ -108,6 +108,7 @@ assert line11.index("APT 软件包更新") == line12.index("检查 VPS Tool 更�
 PY_MENU
 grep -q '执行 SSH 配置回滚' <<< "$main_menu_view"
 grep -q 'vnStat 流量中心' <<< "$main_menu_view"
+grep -q '安全重启 / 开机自动恢复' <<< "$main_menu_view"
 grep -q 'APT 软件包更新' <<< "$main_menu_view"
 grep -q '检查 VPS Tool 更新' <<< "$main_menu_view"
 printf 'main menu grouping: OK\n'

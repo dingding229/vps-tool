@@ -1,6 +1,6 @@
 # VPS Tool
 
-VPS 到手后的一键初始化脚本。当前版本 `v0.6.0`，使用 Shell 编写，提供美化交互界面。
+VPS 到手后的一键初始化脚本。当前版本 `v0.7.0`，使用 Shell 编写，提供美化交互界面。
 
 ## 交互界面
 
@@ -37,6 +37,8 @@ VPS 到手后的一键初始化脚本。当前版本 `v0.6.0`，使用 Shell 编
 - vnStat 数据统一转换为 KiB / MiB / GiB / TiB，并以中文表格展示，不直接返回原始 JSON
 - vnStat 时间戳统一转换为北京时间，支持切换默认查询接口
 - 调用 [Actions-bbr-v3](https://github.com/byJoey/Actions-bbr-v3)
+- BBRv3 安装期间接管上游的立即重启请求，先保存恢复状态，再延迟安全重启
+- 新内核启动后自动验证 BBRv3、启用 BBR + FQ，并在下次进入工具时显示恢复结果
 - 启动前自动执行 `apt-get update` 并检查系统软件包是否为最新；发现更新时以 Y/N 交互确认是否升级
 - 启动时自动检查并安装 VPS Tool 新版本，更新失败不会阻止现有功能继续运行
 - 系统状态和最终配置检查
@@ -184,6 +186,27 @@ sudo VPS_TOOL_DISABLE_AUTO_UPDATE=1 vps-tool
 
 自动更新状态会记录在 `/var/lib/vps-tool/update.conf`，并显示在“系统状态总览”页面。
 
+## BBRv3 安全重启与自动恢复
+
+BBRv3 内核安装会修改正在使用的内核，必须重启后才能生效。为了避免上游安装器直接重启导致 VPS Tool 流程来不及保存状态，脚本会接管重启流程：
+
+1. 下载并运行 Actions-bbr-v3 前记录当前内核和 Boot ID；
+2. 创建一次性的开机恢复服务 `vps-tool-bbr-resume.service`；
+3. 上游安装器请求立即重启时，不直接中断当前 SSH 流程；
+4. 确认新内核已安装后，将目标内核和恢复状态写入 `/var/lib/vps-tool/bbr.conf`；
+5. 默认在 8 秒后安排安全重启，让终端提示和日志有时间完整写入；
+6. 新系统启动后自动检查是否进入 `joeyblog-bbrv3` 内核；
+7. 验证通过后写入 `/etc/sysctl.d/99-vps-tool-bbr.conf`，启用 `BBR + FQ`；
+8. 完成或失败后自动移除一次性恢复服务，并在下次运行 `sudo vps-tool` 时显示结果。
+
+如果暂时不想重启，在 VPS Tool 的确认问题中输入 `N`。稍后手动执行：
+
+```bash
+sudo reboot
+```
+
+重启后的开机恢复仍会自动执行。如果开机服务未能运行，再次执行 `sudo vps-tool` 也会根据 Boot ID 自动补做恢复检查。安装进度、目标内核和重启结果可在“系统状态总览”的“网络加速”区块查看。
+
 ## vnStat 流量监控
 
 主菜单可分别选择“安装 vnStat 流量监控”和“查看 vnStat 流量”，也可以直接执行：
@@ -250,7 +273,8 @@ sudo vps-tool --enable-root
 - 脚本不会长期保存自动生成的私钥，也不会保存明文密码。
 - 启用 root 密码登录的风险高于仅密钥登录；默认选项始终是仅密钥模式。
 - APT 升级采用常规 `upgrade --with-new-pkgs`，不会自动执行发行版升级，也不会自动删除软件包。
-- BBRv3 安装器来自上游 GitHub，执行前会先下载到临时文件并记录日志。
+- BBRv3 安装器来自上游 GitHub，执行前会先下载到临时文件并记录日志；上游重启请求由 VPS Tool 接管。
+- BBRv3 重启前仍建议确认云厂商控制台或救援模式可用，以便处理新内核无法启动等异常情况。
 - Fail2ban 日志可能来自 `/var/log/fail2ban.log` 或 systemd journal，脚本会自动检测。
 - vnStat 统计依赖后台持续采集；重装前如需保留历史数据，请自行备份 `/var/lib/vnstat/`。
 - 日志查看和解封功能需要 root 权限。

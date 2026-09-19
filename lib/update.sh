@@ -124,6 +124,7 @@ install_remote_update() {
         || ! -f "${source_dir}/config/defaults.conf" \
         || ! -f "${source_dir}/lib/common.sh" \
         || ! -f "${source_dir}/lib/apt.sh" \
+        || ! -f "${source_dir}/lib/bbr.sh" \
         || ! -f "${source_dir}/lib/update.sh" \
         || ! -d "${source_dir}/scripts" ]]; then
         log_warn "更新包文件不完整，继续使用当前版本"

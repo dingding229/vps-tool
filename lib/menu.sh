@@ -6,6 +6,9 @@ run_all() {
     configure_fail2ban_interactive || return 1
     configure_vnstat_interactive || return 1
     install_bbr_interactive || return 1
+    if [[ "$BBR_REBOOT_SCHEDULED" == "yes" || "$BBR_REBOOT_REQUIRED" == "yes" ]]; then
+        return 0
+    fi
     verify_system
 }
 
@@ -29,7 +32,7 @@ main_menu() {
 
         ui_menu_group "网络与流量"
         ui_menu_item 7 "vnStat 流量中心" "安装配置 / 流量查询"
-        ui_menu_item 8 "安装 BBRv3" "网络加速 / 需要重启"
+        ui_menu_item 8 "安装 BBRv3" "安全重启 / 开机自动恢复"
 
         ui_menu_group "系统维护"
         ui_menu_item 9 "查看系统状态" "服务与配置总览"
@@ -42,14 +45,22 @@ main_menu() {
         printf '\n'
         choice="$(select_number '请选择功能' 0 12 1)" || return
         case "$choice" in
-            1) run_all; pause_screen ;;
+            1)
+                run_all
+                [[ "$BBR_REBOOT_SCHEDULED" == "yes" ]] && return 0
+                pause_screen
+                ;;
             2) configure_ssh_interactive; pause_screen ;;
             3) enable_root_login_interactive; pause_screen ;;
             4) run_ssh_rollback_now; pause_screen ;;
             5) configure_fail2ban_interactive; pause_screen ;;
             6) fail2ban_log_menu ;;
             7) vnstat_menu ;;
-            8) install_bbr_interactive; pause_screen ;;
+            8)
+                install_bbr_interactive
+                [[ "$BBR_REBOOT_SCHEDULED" == "yes" ]] && return 0
+                pause_screen
+                ;;
             9) show_full_status; pause_screen ;;
             10) verify_system; pause_screen ;;
             11) manage_apt_interactive; pause_screen ;;
