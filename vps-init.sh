@@ -1,7 +1,23 @@
 #!/usr/bin/env bash
 set -Euo pipefail
 
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+resolve_script_dir() {
+    local source_path="${BASH_SOURCE[0]}" source_dir link_target
+    while [[ -L "$source_path" ]]; do
+        source_dir="$(cd -P -- "$(dirname -- "$source_path")" >/dev/null 2>&1 && pwd)" \
+            || return 1
+        link_target="$(readlink -- "$source_path")" || return 1
+        if [[ "$link_target" == /* ]]; then
+            source_path="$link_target"
+        else
+            source_path="${source_dir}/${link_target}"
+        fi
+    done
+    cd -P -- "$(dirname -- "$source_path")" >/dev/null 2>&1 && pwd
+}
+
+SCRIPT_DIR="$(resolve_script_dir)" \
+    || { printf '无法定位 VPS Tool 安装目录\n' >&2; exit 1; }
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/config/defaults.conf"
 for module in common preflight firewall user rollback ssh root-login logrotate fail2ban fail2ban-log bbr verify status menu; do

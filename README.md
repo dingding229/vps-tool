@@ -1,6 +1,6 @@
 # VPS Tool
 
-VPS 到手后的一键初始化脚本。当前版本 `v0.3.2`，使用 Shell 编写，提供美化交互界面。
+VPS 到手后的一键初始化脚本。当前版本 `v0.3.3`，使用 Shell 编写，提供美化交互界面。
 
 ## 交互界面
 
@@ -63,6 +63,8 @@ sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/dingding229/vps-too
 ```bash
 sudo vps-tool
 ```
+
+快捷命令可以从 `/usr/local/sbin/vps-tool` 符号链接启动，入口脚本会自动解析真实安装目录 `/opt/vps-tool`，不会错误地在 `/usr/local/sbin/config` 或 `/usr/local/sbin/lib` 中查找文件。
 
 仅安装但不立即进入交互菜单：
 
