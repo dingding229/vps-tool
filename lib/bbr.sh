@@ -92,14 +92,57 @@ latest_installed_bbr_kernel() {
 }
 
 bbr_runtime_active() {
-    local version congestion
+    local version congestion qdisc
     version="$(bbr_module_version)"
     congestion="$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || true)"
-    [[ "$version" == "3" && "$congestion" == "bbr" ]]
+    qdisc="$(sysctl -n net.core.default_qdisc 2>/dev/null || true)"
+    [[ "$version" == "3" && "$congestion" == "bbr" && "$qdisc" == "fq" ]]
+}
+
+bbr_failure_reason() {
+    local kernel version congestion qdisc
+    kernel="$(uname -r)"
+    version="$(bbr_module_version)"
+    congestion="$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || true)"
+    qdisc="$(sysctl -n net.core.default_qdisc 2>/dev/null || true)"
+    if [[ "$kernel" != *joeyblog-bbrv3* ]]; then
+        printf 'CURRENT_KERNEL_NOT_BBRV3'
+    elif [[ "$version" != "3" ]]; then
+        printf 'BBR_MODULE_NOT_READY'
+    elif [[ "$congestion" != "bbr" ]]; then
+        printf 'CONGESTION_CONTROL_NOT_READY'
+    elif [[ "$qdisc" != "fq" ]]; then
+        printf 'DEFAULT_QDISC_NOT_READY'
+    else
+        printf 'UNKNOWN_POST_REBOOT_FAILURE'
+    fi
+}
+
+reconcile_bbr_state() {
+    local status target original_boot original_kernel current_kernel
+    [[ -r "$BBR_STATE_FILE" ]] || return 1
+    status="$(read_bbr_state_value STATUS 2>/dev/null || true)"
+    case "$status" in
+        installing|pending_reboot|verification_failed) ;;
+        *) return 1 ;;
+    esac
+    current_kernel="$(uname -r)"
+    [[ "$current_kernel" == *joeyblog-bbrv3* ]] || return 1
+    bbr_runtime_active || return 1
+
+    target="$(read_bbr_state_value TARGET_KERNEL 2>/dev/null || true)"
+    original_boot="$(read_bbr_state_value ORIGINAL_BOOT_ID 2>/dev/null || true)"
+    original_kernel="$(read_bbr_state_value ORIGINAL_KERNEL 2>/dev/null || true)"
+    [[ -n "$target" && "$target" != "unknown" ]] || target="$current_kernel"
+    write_bbr_state "active" "no" "$target" "$original_boot" "$original_kernel" \
+        "BBRv3_RUNTIME_RECONCILED" "no"
+    remove_bbr_resume_service
+    return 0
 }
 
 show_bbr_status() {
-    local kernel congestion qdisc module_state module_version workflow target reboot_required
+    local kernel congestion qdisc module_state module_version workflow target reboot_required message
+    reconcile_bbr_state >/dev/null 2>&1 || true
     kernel="$(uname -r)"
     congestion="$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || printf 'unknown')"
     qdisc="$(sysctl -n net.core.default_qdisc 2>/dev/null || printf 'unknown')"
@@ -119,11 +162,21 @@ show_bbr_status() {
     workflow="$(read_bbr_state_value STATUS 2>/dev/null || true)"
     target="$(read_bbr_state_value TARGET_KERNEL 2>/dev/null || true)"
     reboot_required="$(read_bbr_state_value REBOOT_REQUIRED 2>/dev/null || true)"
+    message="$(read_bbr_state_value MESSAGE 2>/dev/null || true)"
     case "$workflow" in
         installing) ui_kv "安装流程" "${C_YELLOW}● 内核安装中${C_RESET}" ;;
         pending_reboot) ui_kv "安装流程" "${C_YELLOW}▲ 等待重启并自动验证${C_RESET}" ;;
         active) ui_kv "安装流程" "${C_GREEN}✔ 重启后验证通过${C_RESET}" ;;
-        verification_failed) ui_kv "安装流程" "${C_RED}✖ 重启后验证失败${C_RESET}" ;;
+        verification_failed)
+            ui_kv "安装流程" "${C_RED}✖ 重启后验证失败${C_RESET}"
+            case "$message" in
+                CURRENT_KERNEL_NOT_BBRV3) ui_kv "失败原因" "当前未进入目标 BBRv3 内核" ;;
+                BBR_MODULE_NOT_READY) ui_kv "失败原因" "BBR v3 模块尚未就绪" ;;
+                CONGESTION_CONTROL_NOT_READY) ui_kv "失败原因" "拥塞控制算法尚未切换为 bbr" ;;
+                DEFAULT_QDISC_NOT_READY) ui_kv "失败原因" "默认队列算法尚未切换为 fq" ;;
+                *) ui_kv "失败原因" "开机检查时运行状态尚未就绪" ;;
+            esac
+            ;;
         installer_failed) ui_kv "安装流程" "${C_RED}✖ 上游安装器执行失败${C_RESET}" ;;
         no_change) ui_kv "安装流程" "${C_DIM}未检测到新的内核安装${C_RESET}" ;;
     esac
@@ -144,11 +197,13 @@ setup_bbr_resume_service() {
     cat > "$temp_unit" <<EOF_UNIT
 [Unit]
 Description=VPS Tool BBRv3 post-reboot verification
-After=network.target
+Wants=network-online.target
+After=network-online.target systemd-modules-load.service systemd-sysctl.service
 ConditionPathExists=${BBR_STATE_FILE}
 
 [Service]
 Type=oneshot
+ExecStartPre=/bin/sleep 10
 ExecStart=/bin/bash "${escaped_entry}" --bbr-resume
 
 [Install]
@@ -270,6 +325,9 @@ EOF_SYSCTL
 
 resume_bbr_after_reboot() {
     local status original_boot original_kernel target current_boot current_kernel
+    local attempts delay attempt reason
+    reconcile_bbr_state && return 0
+
     status="$(read_bbr_state_value STATUS 2>/dev/null || true)"
     case "$status" in
         installing|pending_reboot) ;;
@@ -288,19 +346,32 @@ resume_bbr_after_reboot() {
         return 0
     fi
 
+    attempts="${BBR_RESUME_RETRIES:-6}"
+    delay="${BBR_RESUME_RETRY_DELAY:-5}"
     log_info "正在执行 BBRv3 重启后自动恢复检查..."
-    if [[ "$current_kernel" == *joeyblog-bbrv3* ]] \
-        && persist_bbr_runtime_defaults \
-        && bbr_runtime_active; then
-        write_bbr_state "active" "no" "$target" "$original_boot" "$original_kernel" \
-            "BBRv3_REBOOT_VERIFIED" "no"
-        log_success "BBRv3 已在新内核 ${current_kernel} 上启用"
-    else
-        write_bbr_state "verification_failed" "no" "$target" "$original_boot" "$original_kernel" \
-            "BBRv3_POST_REBOOT_CHECK_FAILED" "no"
-        log_error "BBRv3 重启后检查未通过，当前内核：${current_kernel}"
+    if [[ "$current_kernel" == *joeyblog-bbrv3* ]]; then
+        for ((attempt=1; attempt<=attempts; attempt++)); do
+            persist_bbr_runtime_defaults || true
+            if bbr_runtime_active; then
+                write_bbr_state "active" "no" "$target" "$original_boot" "$original_kernel" \
+                    "BBRv3_REBOOT_VERIFIED" "no"
+                log_success "BBRv3 已在新内核 ${current_kernel} 上启用"
+                remove_bbr_resume_service
+                return 0
+            fi
+            if (( attempt < attempts )); then
+                log_warn "BBRv3 运行状态尚未就绪，${delay} 秒后重试（${attempt}/${attempts}）"
+                sleep "$delay"
+            fi
+        done
     fi
+
+    reason="$(bbr_failure_reason)"
+    write_bbr_state "verification_failed" "no" "$target" "$original_boot" "$original_kernel" \
+        "$reason" "no"
+    log_error "BBRv3 重启后检查未通过，当前内核：${current_kernel}，原因：${reason}"
     remove_bbr_resume_service
+    return 1
 }
 
 notify_bbr_resume_result() {

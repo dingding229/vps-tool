@@ -67,11 +67,12 @@ main() {
     initialize_runtime
     acquire_lock
     cleanup_retained_update_directories
-    local requested_action="${1:---interactive}"
-    resume_bbr_after_reboot
-    if [[ "$requested_action" != "--bbr-resume" ]]; then
-        notify_bbr_resume_result
+    local requested_action="${1:---interactive}" bbr_resume_result=0
+    resume_bbr_after_reboot || bbr_resume_result=$?
+    if [[ "$requested_action" == "--bbr-resume" ]]; then
+        return "$bbr_resume_result"
     fi
+    notify_bbr_resume_result
     if [[ "${VPS_TOOL_SKIP_APT_CHECK:-0}" != "1" \
         && "$requested_action" != "--bbr-resume" \
         && "$requested_action" != "--rollback" \
@@ -99,7 +100,6 @@ main() {
         --rollback) run_ssh_rollback_now ;;
         --update) update_now_interactive ;;
         --apt) manage_apt_interactive ;;
-        --bbr-resume) : ;;
         --no-clear) export VPS_TOOL_NO_CLEAR=1; main_menu ;;
         --help|-h) usage ;;
         *) usage; return 2 ;;

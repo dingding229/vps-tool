@@ -58,6 +58,8 @@ printf 'BBRv3 installed-kernel detection: OK\n'
 
 setup_bbr_resume_service
 grep -q -- '--bbr-resume' "$BBR_RESUME_UNIT_FILE"
+grep -q 'ExecStartPre=/bin/sleep 10' "$BBR_RESUME_UNIT_FILE"
+grep -q 'systemd-modules-load.service systemd-sysctl.service' "$BBR_RESUME_UNIT_FILE"
 grep -q 'enable vps-tool-bbr-resume.service' "$MOCK_SYSTEMCTL_LOG"
 printf 'BBRv3 resume service creation: OK\n'
 
@@ -143,6 +145,20 @@ notice="$(notify_bbr_resume_result)"
 grep -q 'BBRv3 重启恢复完成' <<< "$notice"
 grep -q '^NOTIFIED=yes$' "$BBR_STATE_FILE"
 printf 'BBRv3 resume notification: OK\n'
+
+cat > "$BBR_STATE_FILE" <<'STATE'
+STATUS=verification_failed
+REBOOT_REQUIRED=no
+TARGET_KERNEL=6.13.1-joeyblog-bbrv3-max
+ORIGINAL_BOOT_ID=old-boot-id
+ORIGINAL_KERNEL=6.1.0-generic
+MESSAGE=CURRENT_KERNEL_NOT_BBRV3
+NOTIFIED=yes
+STATE
+status_view="$(show_bbr_status)"
+grep -q '重启后验证通过' <<< "$status_view"
+grep -q '^STATUS=active$' "$BBR_STATE_FILE"
+printf 'BBRv3 stale failure reconciliation: OK\n'
 
 BBR_REBOOT_SCHEDULED=no
 BBR_REBOOT_DELAY=8
