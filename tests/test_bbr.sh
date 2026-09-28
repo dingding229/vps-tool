@@ -114,15 +114,21 @@ uname() {
     if [[ "${1:-}" == "-r" ]]; then printf '6.13.1-joeyblog-bbrv3-max\n'; else command uname "$@"; fi
 }
 modinfo() {
-    [[ "${1:-}" == "tcp_bbr" ]] && printf 'version: 3\n'
+    [[ "${1:-}" == "tcp_bbr" ]] && printf 'version:        3   \n'
 }
 sysctl() {
     case "$*" in
-        '-n net.ipv4.tcp_congestion_control') printf 'bbr\n' ;;
-        '-n net.core.default_qdisc') printf 'fq\n' ;;
+        '-n net.ipv4.tcp_congestion_control') printf '  bbr  \n' ;;
+        '-n net.core.default_qdisc') printf '  fq  \n' ;;
         *) return 0 ;;
     esac
 }
+[[ "$(bbr_module_version)" == "3" ]]
+[[ "$(bbr_sysctl_value net.ipv4.tcp_congestion_control)" == "bbr" ]]
+[[ "$(bbr_sysctl_value net.core.default_qdisc)" == "fq" ]]
+bbr_runtime_active
+printf 'BBRv3 normalized runtime detection: OK\n'
+
 persist_bbr_runtime_defaults() { return 0; }
 remove_bbr_resume_service() { :; }
 cat > "$BBR_STATE_FILE" <<'STATE'

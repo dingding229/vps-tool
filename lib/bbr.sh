@@ -17,7 +17,25 @@ current_boot_id() {
 
 bbr_module_version() {
     command_exists modinfo || return 0
-    modinfo tcp_bbr 2>/dev/null | awk -F': ' '/^version:/ {print $2; exit}' || true
+    modinfo tcp_bbr 2>/dev/null | awk '
+        /^version:/ {
+            value = substr($0, index($0, ":") + 1)
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+            print value
+            exit
+        }
+    ' || true
+}
+
+bbr_sysctl_value() {
+    local key="$1"
+    sysctl -n "$key" 2>/dev/null | awk '
+        {
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "")
+            print
+            exit
+        }
+    ' || true
 }
 
 read_bbr_state_value() {
@@ -33,8 +51,10 @@ write_bbr_state() {
     local current_kernel module_version congestion qdisc temp_file
     current_kernel="$(uname -r)"
     module_version="$(bbr_module_version)"
-    congestion="$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || printf 'unknown')"
-    qdisc="$(sysctl -n net.core.default_qdisc 2>/dev/null || printf 'unknown')"
+    congestion="$(bbr_sysctl_value net.ipv4.tcp_congestion_control)"
+    [[ -n "$congestion" ]] || congestion="unknown"
+    qdisc="$(bbr_sysctl_value net.core.default_qdisc)"
+    [[ -n "$qdisc" ]] || qdisc="unknown"
     mkdir -p "$(dirname "$BBR_STATE_FILE")"
     temp_file="${BBR_STATE_FILE}.tmp.$$"
     cat > "$temp_file" <<EOF_STATE
@@ -94,8 +114,8 @@ latest_installed_bbr_kernel() {
 bbr_runtime_active() {
     local version congestion qdisc
     version="$(bbr_module_version)"
-    congestion="$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || true)"
-    qdisc="$(sysctl -n net.core.default_qdisc 2>/dev/null || true)"
+    congestion="$(bbr_sysctl_value net.ipv4.tcp_congestion_control)"
+    qdisc="$(bbr_sysctl_value net.core.default_qdisc)"
     [[ "$version" == "3" && "$congestion" == "bbr" && "$qdisc" == "fq" ]]
 }
 
@@ -103,8 +123,8 @@ bbr_failure_reason() {
     local kernel version congestion qdisc
     kernel="$(uname -r)"
     version="$(bbr_module_version)"
-    congestion="$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || true)"
-    qdisc="$(sysctl -n net.core.default_qdisc 2>/dev/null || true)"
+    congestion="$(bbr_sysctl_value net.ipv4.tcp_congestion_control)"
+    qdisc="$(bbr_sysctl_value net.core.default_qdisc)"
     if [[ "$kernel" != *joeyblog-bbrv3* ]]; then
         printf 'CURRENT_KERNEL_NOT_BBRV3'
     elif [[ "$version" != "3" ]]; then
@@ -144,8 +164,10 @@ show_bbr_status() {
     local kernel congestion qdisc module_state module_version workflow target reboot_required message
     reconcile_bbr_state >/dev/null 2>&1 || true
     kernel="$(uname -r)"
-    congestion="$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || printf 'unknown')"
-    qdisc="$(sysctl -n net.core.default_qdisc 2>/dev/null || printf 'unknown')"
+    congestion="$(bbr_sysctl_value net.ipv4.tcp_congestion_control)"
+    [[ -n "$congestion" ]] || congestion="unknown"
+    qdisc="$(bbr_sysctl_value net.core.default_qdisc)"
+    [[ -n "$qdisc" ]] || qdisc="unknown"
     if [[ -d /sys/module/tcp_bbr ]]; then module_state="loaded"; else module_state="missing"; fi
     module_version="$(bbr_module_version)"
 
