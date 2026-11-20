@@ -21,7 +21,7 @@ backup_ssh_config_snapshot() {
 
 restore_ssh_config_snapshot() {
     local backup_dir="$1" file index=0 result=0
-    [[ -s "$backup_dir/paths" ]] || return 1
+    [[ -r "$backup_dir/paths" ]] || return 1
     while IFS= read -r file; do
         if [[ -f "$backup_dir/$index" ]]; then
             cp -a -- "$backup_dir/$index" "$file" || result=1

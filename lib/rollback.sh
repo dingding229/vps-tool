@@ -9,6 +9,13 @@ SSH_PENDING_PORT=""
 SSH_PENDING_FIREWALL="none"
 SSH_PENDING_RELOAD=0
 
+create_ssh_config_snapshot() {
+    local backup_dir
+    backup_dir="$(mktemp -d "${APP_BACKUP_DIR}/ssh-$(beijing_compact).XXXXXX")" || return 1
+    backup_ssh_config_snapshot "$backup_dir" "$@" || return 1
+    printf '%s' "$backup_dir"
+}
+
 clear_pending_ssh_config() {
     SSH_PENDING_BACKUP=""
     SSH_PENDING_PORT=""

@@ -279,10 +279,78 @@ finish_ssh_security_config() {
     log_success "SSH 安全配置已完成"
 }
 
+ssh_is_temporary_password_config() {
+    local file="$1"
+    [[ -f "$file" && ! -L "$file" ]] || return 1
+    # 不停用含端口、Include、访问名单或其他用途指令的文件。
+    awk '
+        {sub(/\r$/, "")}
+        /^[[:space:]]*(#|$)/ {next}
+        tolower($1)=="authenticationmethods" {
+            for (i=2; i<=NF && $i !~ /^#/; i++) if ($i=="any" || $i=="\"any\"") found=1
+            next
+        }
+        tolower($1) ~ /^(match|passwordauthentication|permitrootlogin|pubkeyauthentication|kbdinteractiveauthentication|challengeresponseauthentication|permitemptypasswords)$/ {next}
+        {invalid=1}
+        END {exit (!found || invalid)}
+    ' "$file"
+}
+
+ssh_has_temporary_password_conflict() {
+    local output="$1" file="$2" line
+    while IFS= read -r line; do
+        line="${line%$'\r'}"
+        if [[ "$line" == "$file line "*': "any" must appear alone in AuthenticationMethods' ]]; then
+            return 0
+        fi
+    done <<< "$output"
+    return 1
+}
+
+confirm_disable_temporary_password_config() {
+    local file="$1"
+    log_warn "停用将使 ${file} 中的所有认证规则不再加载，可能关闭原有密码登录；请保留当前连接"
+    confirm "是否备份并停用此临时密码配置"
+}
+
+disable_temporary_password_config() {
+    local file="$1" saved_file manifest="${SSH_PENDING_BACKUP}/paths" index
+    index="$(awk 'END {print NR}' "$manifest")" || return 1
+    saved_file="${SSH_PENDING_BACKUP}/${index}"
+    if ! ssh_is_temporary_password_config "$file" || ! cp -a -- "$file" "$saved_file" \
+        || ! ssh_is_temporary_password_config "$saved_file" || ! cmp -s "$saved_file" "$file"; then
+        log_error "临时密码配置未备份、包含其他设置或已变更，未停用：${file}"
+        return 1
+    fi
+    # 仅在确认停用时纳入回滚范围，拒绝停用或检查失败时不覆盖该文件。
+    printf '%s\n' "$file" >> "$manifest" && rm -- "$file"
+}
+
+repair_existing_ssh_syntax() {
+    local output="$1" file="$2"
+    printf '%s\n' "$output" >&2
+    if ! ssh_has_temporary_password_conflict "$output" "$file" || ! ssh_is_temporary_password_config "$file"; then
+        log_error "原 SSH 配置未通过语法检查。请在 VPS 控制台检查上述文件；未修改配置或重载服务"
+        return 1
+    fi
+    confirm_disable_temporary_password_config "$file" || return 1
+    SSH_PENDING_BACKUP="$(create_ssh_config_snapshot)" \
+        || { log_error "无法备份临时密码配置，未执行停用"; return 1; }
+    if ! disable_temporary_password_config "$file" || ! sshd -t; then
+        log_error "停用后仍无法验证 SSH 配置，正在恢复原文件"
+        cleanup_pending_ssh_config
+        return 1
+    fi
+    log_success "已停用临时密码配置，备份：${SSH_PENDING_BACKUP}"
+    clear_pending_ssh_config
+    log_info "未改动 SSH 端口或重载服务。请保留当前连接，重新选择「配置 SSH 安全策略」继续"
+}
+
 configure_ssh_interactive() {
     ui_header
     ui_title "SSH 安全配置"
-    local required_cmd file
+    local required_cmd file syntax_output
+    local temp_password_config="${SSH_LEGACY_DROPIN_FILE%/*}/00-temp-password.conf"
     for required_cmd in sshd ss systemctl systemd-run flock ssh-keygen; do
         command_exists "$required_cmd" || { log_error "缺少必要命令：${required_cmd}"; return 1; }
     done
@@ -294,6 +362,10 @@ configure_ssh_interactive() {
             return 1
         fi
     done
+    if ! syntax_output="$(sshd -t 2>&1)"; then
+        repair_existing_ssh_syntax "$syntax_output" "$temp_password_config"
+        return $?
+    fi
     ssh_service_name
     detect_current_ssh_port
     ui_section "01" "当前连接"
@@ -377,8 +449,7 @@ configure_ssh_interactive() {
     confirm "确认继续" "Y" || { log_warn "已取消 SSH 配置"; return 0; }
 
     [[ -f "$SSHD_MAIN_CONFIG" ]] || { log_error "找不到 ${SSHD_MAIN_CONFIG}"; return 1; }
-    backup_dir="$(mktemp -d "${APP_BACKUP_DIR}/ssh-$(beijing_compact).XXXXXX")" \
-        && backup_ssh_config_snapshot "$backup_dir" "${config_paths[@]}" \
+    backup_dir="$(create_ssh_config_snapshot "${config_paths[@]}")" \
         || { log_error "无法备份 SSH 配置，未应用策略"; return 1; }
     SSH_PENDING_BACKUP="$backup_dir"
     SSH_PENDING_PORT="$NEW_SSH_PORT"
@@ -398,6 +469,22 @@ configure_ssh_interactive() {
         log_error "无法写入 SSH 配置，正在恢复"
         cleanup_pending_ssh_config
         return 1
+    fi
+
+    if ! syntax_output="$(sshd -t 2>&1)"; then
+        printf '%s\n' "$syntax_output" >&2
+        if ! ssh_has_temporary_password_conflict "$syntax_output" "$temp_password_config" \
+            || ! ssh_is_temporary_password_config "$temp_password_config" \
+            || ! confirm_disable_temporary_password_config "$temp_password_config" \
+            || ! disable_temporary_password_config "$temp_password_config" \
+            || ! sshd -t; then
+            log_error "SSH 配置检查失败，正在恢复；其他配置文件不会被停用"
+            cleanup_pending_ssh_config
+            return 1
+        fi
+        # 停用密码配置会改变登录行为，即使端口相同，也需要新连接确认和定时回滚。
+        skip_connection_test=0
+        log_info "已暂时停用临时密码配置，回滚时会恢复；备份：${backup_dir}"
     fi
 
     # 旧托管文件被重复 Include 时，重复端口可能实际只有一个来源。迁移后必须保留它。

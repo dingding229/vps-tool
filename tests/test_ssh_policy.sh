@@ -34,12 +34,20 @@ setup_config() {
     ROOT_SSH_DROPIN_FILE="$fixture/conf.d/00-00-vps-tool-root-access.conf"
     SSH_ROLLBACK_STATE="$fixture/rollback.env"
     SSH_ROLLBACK_LOCK="$fixture/rollback.lock"
+    TEMP_PASSWORD_CONFIG="$fixture/conf.d/00-temp-password.conf"
     mkdir -p "$APP_BACKUP_DIR" "$APP_STATE_DIR" "$fixture/conf.d"
     printf 'HostKey %s\n' "$temp_dir/host_key" > "$SSHD_MAIN_CONFIG"
 }
 
 # 仅执行 sshd 的配置检查模式；服务、连接和自动回滚定时器由测试替代。
-sshd() { command sshd -f "$SSHD_MAIN_CONFIG" "$@"; }
+simulate_older_parser=0
+sshd() {
+    if [[ "$1" == '-t' && "$simulate_older_parser" == '1' && -f "$SSH_DROPIN_FILE" && -f "$TEMP_PASSWORD_CONFIG" ]]; then
+        printf '%s line 4: "any" must appear alone in AuthenticationMethods\n' "$TEMP_PASSWORD_CONFIG" >&2
+        return 255
+    fi
+    command sshd -f "$SSHD_MAIN_CONFIG" "$@"
+}
 ss() { printf 'LISTEN 0 128 0.0.0.0:6900 0.0.0.0:*\n'; }
 flock() { :; }
 sleep() { :; }
@@ -60,10 +68,12 @@ prompt_value() {
 }
 ensure_authorized_key() { :; }
 test_login_ok=1
+disable_temp_password_ok=0
 confirm() {
     case "$1" in
         '确认继续') return 0 ;;
         '是否已使用新端口和密钥登录成功') (( test_login_ok == 1 )) ;;
+        '是否备份并停用此临时密码配置') (( disable_temp_password_ok == 1 )) ;;
         *) return 1 ;;
     esac
 }
@@ -161,3 +171,81 @@ grep -Fq 'PasswordAuthentication 未生效（用户 root，实际：yes，期望
 cmp "$fixture/main-before" "$SSHD_MAIN_CONFIG"
 [[ ! -e "$fixture/reloads" && ! -e "$SSH_DROPIN_FILE" ]]
 printf 'SSH conflicting third-party Match reports the actual value and rolls back: OK\n'
+
+prepare_temp_password_config() {
+    printf 'Port 6900\nInclude %s\n' "$fixture/conf.d/*.conf" >> "$SSHD_MAIN_CONFIG"
+    cat > "$TEMP_PASSWORD_CONFIG" <<CONF
+# Temporary password access
+PermitRootLogin yes
+PasswordAuthentication yes
+AuthenticationMethods $1
+CONF
+    cp "$TEMP_PASSWORD_CONFIG" "$fixture/temp-before"
+    cp "$SSHD_MAIN_CONFIG" "$fixture/main-before"
+}
+
+setup_config already-invalid-any
+prepare_temp_password_config 'any publickey'
+if sshd -t > "$fixture/before" 2>&1; then
+    printf 'FAIL: the invalid AuthenticationMethods fixture passed\n'
+    exit 1
+fi
+grep -Fq '"any" must appear alone in AuthenticationMethods' "$fixture/before"
+disable_temp_password_ok=1
+if ! configure_ssh_interactive > "$fixture/result" 2>&1; then
+    cat "$fixture/result" >&2
+    exit 1
+fi
+grep -Fq '请保留当前连接，重新选择「配置 SSH 安全策略」继续' "$fixture/result"
+[[ ! -e "$TEMP_PASSWORD_CONFIG" && ! -e "$SSH_DROPIN_FILE" && ! -e "$fixture/reloads" ]]
+cmp "$fixture/main-before" "$SSHD_MAIN_CONFIG"
+snapshot_files=("$APP_BACKUP_DIR"/*/0)
+[[ "${#snapshot_files[@]}" == 1 ]]
+cmp "$fixture/temp-before" "${snapshot_files[0]}"
+sshd -t
+printf 'Invalid temporary password config can be disabled without reloading or changing the port: OK\n'
+
+setup_config refused-temp-conflict
+prepare_temp_password_config any
+simulate_older_parser=1
+disable_temp_password_ok=0
+if configure_ssh_interactive > "$fixture/result" 2>&1; then
+    printf 'FAIL: refusing to disable the temp config should keep all original settings\n'
+    exit 1
+fi
+cmp "$fixture/main-before" "$SSHD_MAIN_CONFIG"
+cmp "$fixture/temp-before" "$TEMP_PASSWORD_CONFIG"
+[[ ! -e "$SSH_DROPIN_FILE" && ! -e "$fixture/reloads" ]]
+
+setup_config declined-new-login
+prepare_temp_password_config any
+disable_temp_password_ok=1
+test_login_ok=0
+if configure_ssh_interactive > "$fixture/result" 2>&1; then
+    printf 'FAIL: a rollback should restore the disabled temporary password config\n'
+    exit 1
+fi
+grep -Fq '回滚时会恢复' "$fixture/result"
+cmp "$fixture/main-before" "$SSHD_MAIN_CONFIG"
+cmp "$fixture/temp-before" "$TEMP_PASSWORD_CONFIG"
+[[ ! -e "$SSH_DROPIN_FILE" && -s "$fixture/reloads" ]]
+printf 'Temporary password config conflict remains reversible until a new login is confirmed: OK\n'
+
+setup_config accepted-temp-conflict
+prepare_temp_password_config any
+test_login_ok=1
+configure_ssh_interactive > "$fixture/result" 2>&1
+[[ ! -e "$TEMP_PASSWORD_CONFIG" && ! -e "$SSH_ROLLBACK_STATE" ]]
+verify_effective_ssh_config 6900 root prohibit-password
+
+setup_config extra-rules
+prepare_temp_password_config any
+printf 'AllowUsers root\n' >> "$TEMP_PASSWORD_CONFIG"
+cp "$TEMP_PASSWORD_CONFIG" "$fixture/temp-before"
+if configure_ssh_interactive > "$fixture/result" 2>&1; then
+    printf 'FAIL: a temp file containing additional access rules must not be taken out of service\n'
+    exit 1
+fi
+cmp "$fixture/temp-before" "$TEMP_PASSWORD_CONFIG"
+[[ ! -e "$SSH_DROPIN_FILE" && ! -e "$fixture/reloads" ]]
+printf 'Temporary config is only disabled when it contains no unrelated SSH settings: OK\n'
