@@ -28,6 +28,7 @@ done
 # 自动生成的私钥仅在用户完成下载和登录确认前临时保留；未完成的 root 配置自动恢复。
 cleanup_vps_tool_session() {
     cleanup_update_transaction
+    cleanup_pending_ssh_config
     cleanup_pending_root_login
     cleanup_generated_private_key
 }

@@ -1,28 +1,61 @@
 #!/usr/bin/env bash
 
 SSH_ROLLBACK_LOCK="/run/lock/vps-tool-ssh-rollback.lock"
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/scripts/ssh-rollback-action.sh"
+
+SSH_PENDING_BACKUP=""
+SSH_PENDING_PORT=""
+SSH_PENDING_FIREWALL="none"
+SSH_PENDING_RELOAD=0
+
+clear_pending_ssh_config() {
+    SSH_PENDING_BACKUP=""
+    SSH_PENDING_PORT=""
+    SSH_PENDING_FIREWALL="none"
+    SSH_PENDING_RELOAD=0
+}
+
+cleanup_pending_ssh_config() {
+    [[ -n "$SSH_PENDING_BACKUP" ]] || return 0
+    if ! restore_ssh_config_snapshot "$SSH_PENDING_BACKUP"; then
+        log_error "无法完整恢复 SSH 配置，请从 ${SSH_PENDING_BACKUP} 检查备份"
+        return 1
+    fi
+    if (( SSH_PENDING_RELOAD == 1 )); then
+        if ! sshd -t || ! systemctl reload "$SSH_SERVICE"; then
+            log_error "已恢复原 SSH 配置，但服务重载失败，请通过 VPS 控制台检查"
+            clear_pending_ssh_config
+            return 1
+        fi
+    fi
+    if [[ "$SSH_PENDING_FIREWALL" == ufw || "$SSH_PENDING_FIREWALL" == firewalld ]]; then
+        firewall_remove_ssh_port "$SSH_PENDING_PORT"
+    fi
+    clear_pending_ssh_config
+}
 
 install_rollback_helper() {
-    mkdir -p /usr/local/lib/vps-tool
+    mkdir -p /usr/local/lib/vps-tool || return 1
     install -m 700 "${SCRIPT_DIR}/scripts/ssh-rollback-action.sh" /usr/local/lib/vps-tool/ssh-rollback-action.sh
 }
 
 schedule_ssh_rollback() {
-    local backup_file="$1" existed="$2" new_port="$3" firewall_kind="$4" service_name="$5" timeout="$6"
-    install_rollback_helper
-    cat > "$SSH_ROLLBACK_STATE" <<STATE
-DROPIN_FILE=$(printf '%q' "$SSH_DROPIN_FILE")
-BACKUP_FILE=$(printf '%q' "$backup_file")
-DROPIN_EXISTED=$(printf '%q' "$existed")
+    local backup_dir="$1" new_port="$2" firewall_kind="$3" service_name="$4" timeout="$5"
+    install_rollback_helper || return 1
+    (umask 077; cat > "$SSH_ROLLBACK_STATE") <<STATE || return 1
+SSH_CONFIG_BACKUP_DIR=$(printf '%q' "$backup_dir")
 NEW_PORT=$(printf '%q' "$new_port")
 FIREWALL_KIND=$(printf '%q' "$firewall_kind")
 SSH_SERVICE=$(printf '%q' "$service_name")
 STATE
-    chmod 600 "$SSH_ROLLBACK_STATE"
     systemctl stop "${SSH_ROLLBACK_UNIT}.timer" "${SSH_ROLLBACK_UNIT}.service" >/dev/null 2>&1 || true
     systemctl reset-failed "${SSH_ROLLBACK_UNIT}.service" >/dev/null 2>&1 || true
-    systemd-run --unit="$SSH_ROLLBACK_UNIT" --on-active="${timeout}s" \
-        /usr/local/lib/vps-tool/ssh-rollback-action.sh >/dev/null 2>&1
+    if ! systemd-run --unit="$SSH_ROLLBACK_UNIT" --on-active="${timeout}s" \
+        /usr/local/lib/vps-tool/ssh-rollback-action.sh >/dev/null 2>&1; then
+        rm -f -- "$SSH_ROLLBACK_STATE"
+        return 1
+    fi
     log_warn "已设置 ${timeout} 秒 SSH 自动回滚保护"
 }
 
@@ -30,7 +63,6 @@ cancel_ssh_rollback() {
     local expected_port="${1:-}"
     exec 8>"$SSH_ROLLBACK_LOCK"
     flock -x 8
-    systemctl stop "${SSH_ROLLBACK_UNIT}.timer" >/dev/null 2>&1 || true
 
     if [[ ! -f "$SSH_ROLLBACK_STATE" ]]; then
         flock -u 8
@@ -48,7 +80,7 @@ cancel_ssh_rollback() {
         fi
     fi
 
-    systemctl stop "${SSH_ROLLBACK_UNIT}.service" >/dev/null 2>&1 || true
+    systemctl stop "${SSH_ROLLBACK_UNIT}.timer" "${SSH_ROLLBACK_UNIT}.service" >/dev/null 2>&1 || true
     rm -f "$SSH_ROLLBACK_STATE"
     flock -u 8
     log_success "已安全取消 SSH 自动回滚任务"

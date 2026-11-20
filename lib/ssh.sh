@@ -43,10 +43,21 @@ unique_port_list() {
     awk 'NF && !seen[$1]++ {print $1}'
 }
 
+ssh_user_effective_config() {
+    local user="$1" port="$2" client_ip local_ip host=localhost
+    read -r client_ip _ local_ip _ <<< "${SSH_CONNECTION:-}"
+    if [[ "$client_ip" =~ ^[[:xdigit:].:]+$ && "$local_ip" =~ ^[[:xdigit:].:]+$ ]]; then
+        host="$client_ip"
+    else
+        client_ip=127.0.0.1
+        local_ip=127.0.0.1
+    fi
+    sshd -T -C "user=${user},host=${host},addr=${client_ip},laddr=${local_ip},lport=${port}" 2>/dev/null
+}
+
 ssh_key_only_login_is_effective() {
     local target_user="$1" effective password pubkey interactive methods permit_root
-    effective="$(sshd -T -C "user=${target_user},host=localhost,addr=127.0.0.1" 2>/dev/null)" \
-        || return 1
+    effective="$(ssh_user_effective_config "$target_user" "$CURRENT_SSH_PORT")" || return 1
     password="$(awk '$1=="passwordauthentication" {print $2; exit}' <<< "$effective")"
     pubkey="$(awk '$1=="pubkeyauthentication" {print $2; exit}' <<< "$effective")"
     interactive="$(awk '$1=="kbdinteractiveauthentication" {print $2; exit}' <<< "$effective")"
@@ -66,8 +77,7 @@ should_write_ssh_port() {
     [[ "$new_port" != "$current_port" ]] && return 0
 
     # 当前端口由 vps-tool 自己管理且没有重复来源时必须保留；否则跳过重复 Port 声明。
-    if [[ -f "$SSH_DROPIN_FILE" ]] \
-        && awk -v wanted="$current_port" 'tolower($1)=="port" && $2==wanted {found=1} END {exit !found}' "$SSH_DROPIN_FILE"; then
+    if ssh_managed_port_exists "$current_port"; then
         current_ports="$(effective_ssh_ports "$target_user" || true)"
         current_count="$(awk 'NF {count++} END {print count+0}' <<< "$current_ports")"
         (( current_count <= 1 )) && return 0
@@ -75,12 +85,23 @@ should_write_ssh_port() {
     return 1
 }
 
+ssh_managed_port_exists() {
+    local port="$1" file
+    for file in "$SSH_DROPIN_FILE" "$SSH_LEGACY_DROPIN_FILE"; do
+        if [[ -f "$file" ]] && awk -v wanted="$port" \
+            'tolower($1)=="port" && $2==wanted {found=1} END {exit !found}' "$file"; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 write_ssh_dropin() {
     local port="$1" allow_root="$2" write_port="${3:-yes}"
-    mkdir -p "$(dirname "$SSH_DROPIN_FILE")"
+    mkdir -p "$(dirname "$SSH_DROPIN_FILE")" || return 1
     {
-        printf '# Managed by vps-tool. Generated: %s\n' "$(beijing_iso)"
-        [[ "$write_port" == "yes" ]] && printf 'Port %s\n' "$port"
+        printf '# Managed by vps-tool. Generated: %s\n' "$(beijing_iso)" || return 1
+        if [[ "$write_port" == "yes" ]]; then printf 'Port %s\n' "$port" || return 1; fi
         cat <<EOF_SSH
 PubkeyAuthentication yes
 PasswordAuthentication no
@@ -93,14 +114,65 @@ MaxAuthTries 4
 LoginGraceTime 30
 X11Forwarding no
 EOF_SSH
-    } > "$SSH_DROPIN_FILE"
+    } > "$SSH_DROPIN_FILE" || return 1
     chmod 600 "$SSH_DROPIN_FILE"
 }
 
+ensure_ssh_security_include() {
+    local remove_root="$1" temp_file
+    temp_file="$(mktemp "${SSHD_MAIN_CONFIG}.vps-tool.XXXXXX")" || return 1
+    if cp -a -- "$SSHD_MAIN_CONFIG" "$temp_file" \
+        && awk -v managed="$SSH_DROPIN_FILE" -v legacy="$SSH_LEGACY_DROPIN_FILE" \
+            -v root_override="$ROOT_SSH_DROPIN_FILE" -v remove_root="$remove_root" '
+        NR==1 {
+            if (!remove_root && $0=="Include " root_override) {print; print "Include " managed; next}
+            print "Include " managed
+        }
+        tolower($1)=="include" && (NF==2 || $3 ~ /^#/) &&
+            ($2==managed || $2==legacy || (remove_root && $2==root_override)) {next}
+        {print}
+        END {if (!NR) print "Include " managed}
+    ' "$SSHD_MAIN_CONFIG" > "$temp_file"; then
+        if ! cmp -s "$temp_file" "$SSHD_MAIN_CONFIG"; then
+            mv -f -- "$temp_file" "$SSHD_MAIN_CONFIG" && return 0
+        else
+            rm -f -- "$temp_file"
+            return 0
+        fi
+    fi
+    rm -f -- "$temp_file"
+    return 1
+}
+
+ssh_config_is_managed() {
+    [[ -f "$1" && ! -L "$1" ]] && grep -q '^# Managed by vps-tool\. Generated:' "$1"
+}
+
+apply_ssh_security_config() {
+    local port="$1" root_policy="$2" write_port="$3" remove_root="$4"
+    write_ssh_dropin "$port" "$root_policy" "$write_port" \
+        && ensure_ssh_security_include "$remove_root" \
+        && rm -f -- "$SSH_LEGACY_DROPIN_FILE" || return 1
+    if (( remove_root == 1 )); then
+        rm -f -- "$ROOT_SSH_DROPIN_FILE" || return 1
+    fi
+}
+
+verify_ssh_auth_setting() {
+    local config="$1" label="$2" expected="$3" scope="$4" effective
+    effective="$(awk -v key="$label" '$1==tolower(key) {$1=""; sub(/^ /, ""); print; exit}' <<< "$config")"
+    if [[ "$effective" != "$expected" ]]; then
+        log_error "${label} 未生效（${scope}，实际：${effective:-未检测到}，期望：${expected}）"
+        return 1
+    fi
+}
+
 verify_effective_ssh_config() {
-    local port="$1" target_user="$2" effective effective_ports unique_ports raw_display
+    local port="$1" target_user="$2" root_policy="${3:-}" effective effective_ports unique_ports raw_display
+    local setting expected scope="用户 ${target_user}"
     sshd -t || return 1
-    effective="$(sshd -T -C "user=${target_user},host=localhost,addr=127.0.0.1" 2>/dev/null)" || return 1
+    effective="$(ssh_user_effective_config "$target_user" "$port")" \
+        || { log_error "无法读取 ${target_user} 的 SSH 生效配置"; return 1; }
     effective_ports="$(awk '$1=="port" {print $2}' <<< "$effective")"
     unique_ports="$(unique_port_list <<< "$effective_ports")"
     raw_display="${effective_ports//$'\n'/,}"
@@ -113,9 +185,23 @@ verify_effective_ssh_config() {
     if [[ "$(awk 'NF {count++} END {print count+0}' <<< "$effective_ports")" -gt 1 ]]; then
         log_info "检测到重复的 Port ${port} 声明，已按同一端口跳过重复项"
     fi
-    grep -qx 'passwordauthentication no' <<< "$effective" || { log_error "PasswordAuthentication 未生效"; return 1; }
-    grep -qx 'kbdinteractiveauthentication no' <<< "$effective" || { log_error "KbdInteractiveAuthentication 未生效"; return 1; }
-    grep -qx 'pubkeyauthentication yes' <<< "$effective" || { log_error "PubkeyAuthentication 未生效"; return 1; }
+    for setting in PasswordAuthentication KbdInteractiveAuthentication PubkeyAuthentication AuthenticationMethods; do
+        case "$setting" in
+            PubkeyAuthentication) expected=yes ;;
+            AuthenticationMethods) expected=publickey ;;
+            *) expected=no ;;
+        esac
+        if ! verify_ssh_auth_setting "$effective" "$setting" "$expected" "$scope"; then
+            log_warn "请检查是否有匹配 ${target_user} 的 Match 规则覆盖了认证设置"
+            return 1
+        fi
+    done
+    if [[ "$target_user" == root && "$root_policy" == prohibit-password ]]; then
+        verify_ssh_auth_setting "$effective" PermitRootLogin prohibit-password "$scope" || return 1
+    elif [[ "$root_policy" == no ]]; then
+        effective="$(ssh_user_effective_config root "$port")" || return 1
+        verify_ssh_auth_setting "$effective" PermitRootLogin no '用户 root' || return 1
+    fi
 }
 
 ssh_key_rotation_port() {
@@ -182,12 +268,31 @@ rotate_ssh_key_interactive() {
     generate_authorized_key "$port" rotate plain
 }
 
+finish_ssh_security_config() {
+    local user="$1" remove_root="$2"
+    if (( remove_root == 1 )); then
+        rm -f -- "${APP_STATE_DIR}/root-login.conf" || log_warn "无法清理旧的 root 专用策略状态"
+    fi
+    printf 'SSH_PORT=%q\nSSH_USER=%q\nUPDATED_AT=%q\n' \
+        "$NEW_SSH_PORT" "$user" "$(beijing_iso)" > "${APP_STATE_DIR}/ssh.conf" \
+        && chmod 600 "${APP_STATE_DIR}/ssh.conf" || log_warn "无法保存 SSH 配置状态"
+    log_success "SSH 安全配置已完成"
+}
+
 configure_ssh_interactive() {
     ui_header
     ui_title "SSH 安全配置"
-    local required_cmd
+    local required_cmd file
     for required_cmd in sshd ss systemctl systemd-run flock ssh-keygen; do
         command_exists "$required_cmd" || { log_error "缺少必要命令：${required_cmd}"; return 1; }
+    done
+    [[ ! -e "$SSH_ROLLBACK_STATE" && -z "${SSH_PENDING_BACKUP:-}" ]] \
+        || { log_warn "已有待处理的 SSH 配置，请先完成确认或执行回滚"; return 1; }
+    for file in "$SSH_DROPIN_FILE" "$SSH_LEGACY_DROPIN_FILE"; do
+        if [[ -e "$file" || -L "$file" ]] && ! ssh_config_is_managed "$file"; then
+            log_error "配置文件不由 VPS Tool 管理，未覆盖：${file}"
+            return 1
+        fi
     done
     ssh_service_name
     detect_current_ssh_port
@@ -195,9 +300,10 @@ configure_ssh_interactive() {
     ui_kv "SSH 服务" "$(ui_state "$(systemctl is-active "$SSH_SERVICE" 2>/dev/null || true)")"
     ui_kv "当前端口" "${C_BOLD}${C_CYAN}${CURRENT_SSH_PORT}${C_RESET}"
 
-    local target_user default_port new_port root_policy backup_dir backup_file existed=0
+    local target_user default_port new_port root_policy backup_dir
     local port_changed=0 write_port="yes" rollback_firewall_kind="none"
-    local skip_connection_test=0
+    local skip_connection_test=0 remove_root_override=0 preserve_managed_port=0 root_preview
+    local -a config_paths=("$SSHD_MAIN_CONFIG" "$SSH_DROPIN_FILE" "$SSH_LEGACY_DROPIN_FILE")
     ui_subtitle "密钥认证"
     target_user="$(prompt_value '配置密钥登录的用户' "${SUDO_USER:-root}")" || return 1
     ensure_authorized_key "$target_user" "$CURRENT_SSH_PORT" || return 1
@@ -218,6 +324,7 @@ configure_ssh_interactive() {
     else
         if ! should_write_ssh_port "$NEW_SSH_PORT" "$CURRENT_SSH_PORT" "$target_user"; then
             write_port="no"
+            if ssh_managed_port_exists "$CURRENT_SSH_PORT"; then preserve_managed_port=1; fi
         fi
         if ssh_key_only_login_is_effective "$target_user"; then
             skip_connection_test=1
@@ -233,6 +340,22 @@ configure_ssh_interactive() {
         command_exists sudo || { log_error "系统未安装 sudo，拒绝禁用 root SSH 登录"; return 1; }
         root_policy="no"
     fi
+    root_preview="$root_policy"
+    if ssh_config_is_managed "$ROOT_SSH_DROPIN_FILE"; then
+        if [[ "$root_policy" == no ]] || { [[ "$target_user" == root ]] \
+            && ( ! grep -Eq '^[[:space:]]*PasswordAuthentication[[:space:]]+no[[:space:]]*$' "$ROOT_SSH_DROPIN_FILE" \
+                || [[ "$(root_effective_setting permitrootlogin)" != prohibit-password ]] ); }; then
+            remove_root_override=1
+            config_paths+=("$ROOT_SSH_DROPIN_FILE")
+            root_preview="${root_policy}（移除原 VPS Tool root 专用规则）"
+            skip_connection_test=0
+        elif [[ "$target_user" != root ]]; then
+            root_preview="保留原 VPS Tool root 专用规则"
+        fi
+    fi
+    if [[ "$root_policy" == no && "$(root_effective_setting permitrootlogin)" != no ]]; then
+        skip_connection_test=0
+    fi
 
     ui_section "02" "配置预览"
     ui_kv "目标用户" "$target_user"
@@ -242,7 +365,7 @@ configure_ssh_interactive() {
         ui_kv "SSH 端口" "${C_BOLD}${C_CYAN}${CURRENT_SSH_PORT}${C_RESET}  ${C_DIM}保持不变${C_RESET}"
     fi
     ui_kv "登录方式" "${C_GREEN}✔ 仅允许公钥${C_RESET}"
-    ui_kv "root 策略" "$root_policy"
+    ui_kv "root 策略" "$root_preview"
     if (( skip_connection_test == 1 )); then
         ui_kv "连接确认" "${C_GREEN}自动跳过（当前已为仅密钥登录）${C_RESET}"
         ui_kv "回滚保护" "${C_DIM}无需定时回滚${C_RESET}"
@@ -253,58 +376,76 @@ configure_ssh_interactive() {
     printf '\n'
     confirm "确认继续" "Y" || { log_warn "已取消 SSH 配置"; return 0; }
 
+    [[ -f "$SSHD_MAIN_CONFIG" ]] || { log_error "找不到 ${SSHD_MAIN_CONFIG}"; return 1; }
+    backup_dir="$(mktemp -d "${APP_BACKUP_DIR}/ssh-$(beijing_compact).XXXXXX")" \
+        && backup_ssh_config_snapshot "$backup_dir" "${config_paths[@]}" \
+        || { log_error "无法备份 SSH 配置，未应用策略"; return 1; }
+    SSH_PENDING_BACKUP="$backup_dir"
+    SSH_PENDING_PORT="$NEW_SSH_PORT"
     if (( port_changed == 1 )); then
-        firewall_allow_ssh_port "$NEW_SSH_PORT" || { log_error "未确认新端口已放行，已停止"; return 1; }
+        if ! firewall_allow_ssh_port "$NEW_SSH_PORT"; then
+            clear_pending_ssh_config
+            log_error "未确认新端口已放行，已停止"
+            return 1
+        fi
         rollback_firewall_kind="$FIREWALL_KIND"
+        SSH_PENDING_FIREWALL="$rollback_firewall_kind"
     else
         log_info "新端口与当前端口一致，跳过端口切换和防火墙变更"
     fi
 
-    backup_dir="$(create_backup_dir)"
-    backup_file="${backup_dir}/00-vps-tool.conf"
-    if [[ -f "$SSH_DROPIN_FILE" ]]; then
-        cp -a "$SSH_DROPIN_FILE" "$backup_file"
-        existed=1
+    if ! apply_ssh_security_config "$NEW_SSH_PORT" "$root_policy" "$write_port" "$remove_root_override"; then
+        log_error "无法写入 SSH 配置，正在恢复"
+        cleanup_pending_ssh_config
+        return 1
     fi
 
-    write_ssh_dropin "$NEW_SSH_PORT" "$root_policy" "$write_port"
-    if ! verify_effective_ssh_config "$NEW_SSH_PORT" "$target_user"; then
+    # 旧托管文件被重复 Include 时，重复端口可能实际只有一个来源。迁移后必须保留它。
+    if (( preserve_managed_port == 1 )) \
+        && ! effective_ssh_ports "$target_user" | grep -Fxq -- "$NEW_SSH_PORT"; then
+        if ! write_ssh_dropin "$NEW_SSH_PORT" "$root_policy" yes; then
+            log_error "无法保留当前 SSH 端口，正在恢复"
+            cleanup_pending_ssh_config
+            return 1
+        fi
+    fi
+    if ! verify_effective_ssh_config "$NEW_SSH_PORT" "$target_user" "$root_policy"; then
         log_error "SSH 配置检查失败，正在恢复"
-        [[ "$existed" == "1" ]] && cp -a "$backup_file" "$SSH_DROPIN_FILE" || rm -f "$SSH_DROPIN_FILE"
-        (( port_changed == 1 )) && firewall_remove_ssh_port "$NEW_SSH_PORT"
+        cleanup_pending_ssh_config
         return 1
     fi
     log_success "sshd 配置语法和有效参数检查通过"
 
     if (( skip_connection_test == 1 )); then
+        SSH_PENDING_RELOAD=1
         if ! systemctl reload "$SSH_SERVICE"; then
             log_error "SSH 服务重新加载失败，正在恢复原配置"
-            [[ "$existed" == "1" ]] && cp -a "$backup_file" "$SSH_DROPIN_FILE" || rm -f "$SSH_DROPIN_FILE"
-            systemctl reload "$SSH_SERVICE" >/dev/null 2>&1 || true
+            cleanup_pending_ssh_config
             return 1
         fi
         sleep 1
         if ! ss -lntH | awk '{print $4}' | grep -Eq "(^|:)${NEW_SSH_PORT}$"; then
             log_error "未检测到 SSH 继续监听端口 ${NEW_SSH_PORT}，正在恢复原配置"
-            [[ "$existed" == "1" ]] && cp -a "$backup_file" "$SSH_DROPIN_FILE" || rm -f "$SSH_DROPIN_FILE"
-            systemctl reload "$SSH_SERVICE" >/dev/null 2>&1 || true
+            cleanup_pending_ssh_config
             return 1
         fi
-        printf 'SSH_PORT=%q\nSSH_USER=%q\nUPDATED_AT=%q\n' \
-            "$NEW_SSH_PORT" "$target_user" "$(beijing_iso)" > "${APP_STATE_DIR}/ssh.conf"
-        chmod 600 "${APP_STATE_DIR}/ssh.conf"
+        clear_pending_ssh_config
         log_success "当前端口未变化且仅密钥登录已生效，已跳过重复连接确认"
-        log_success "SSH 安全配置已完成"
-        return 0
+        finish_ssh_security_config "$target_user" "$remove_root_override"
+        return
     fi
 
-    if ! schedule_ssh_rollback "$backup_file" "$existed" "$NEW_SSH_PORT" "$rollback_firewall_kind" "$SSH_SERVICE" "$SSH_ROLLBACK_TIMEOUT"; then
-        log_error "无法创建 SSH 自动回滚任务，已恢复原配置"
-        [[ "$existed" == "1" ]] && cp -a "$backup_file" "$SSH_DROPIN_FILE" || rm -f "$SSH_DROPIN_FILE"
-        (( port_changed == 1 )) && firewall_remove_ssh_port "$NEW_SSH_PORT"
+    if ! schedule_ssh_rollback "$backup_dir" "$NEW_SSH_PORT" "$rollback_firewall_kind" "$SSH_SERVICE" "$SSH_ROLLBACK_TIMEOUT"; then
+        log_error "无法创建 SSH 自动回滚任务，正在恢复原配置"
+        cleanup_pending_ssh_config
         return 1
     fi
-    systemctl reload "$SSH_SERVICE"
+    clear_pending_ssh_config
+    if ! systemctl reload "$SSH_SERVICE"; then
+        log_error "SSH 服务重新加载失败，立即回滚"
+        run_ssh_rollback_now
+        return 1
+    fi
     sleep 1
     ss -lntH | awk '{print $4}' | grep -Eq "(^|:)${NEW_SSH_PORT}$" \
         || { log_error "未检测到 SSH 监听新端口，立即回滚"; run_ssh_rollback_now; return 1; }
@@ -325,15 +466,11 @@ configure_ssh_interactive() {
         if [[ "$CURRENT_SSH_PORT" != "$NEW_SSH_PORT" ]]; then
             firewall_remove_ssh_port "$CURRENT_SSH_PORT"
         fi
-        printf 'SSH_PORT=%q\nSSH_USER=%q\nUPDATED_AT=%q\n' \
-            "$NEW_SSH_PORT" "$target_user" "$(beijing_iso)" > "${APP_STATE_DIR}/ssh.conf"
-        chmod 600 "${APP_STATE_DIR}/ssh.conf"
-        log_success "SSH 安全配置已完成"
+        finish_ssh_security_config "$target_user" "$remove_root_override"
         return 0
     fi
 
-    run_ssh_rollback_now
-    log_warn "已按选择恢复原 SSH 配置"
+    if run_ssh_rollback_now; then log_warn "已按选择恢复原 SSH 配置"; fi
     return 1
 
 }

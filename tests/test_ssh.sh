@@ -18,6 +18,8 @@ PY
 }
 trap cleanup EXIT
 SSH_DROPIN_FILE="${temp_dir}/00-vps-tool.conf"
+SSH_LEGACY_DROPIN_FILE="${temp_dir}/previous/00-vps-tool.conf"
+SSH_ROLLBACK_STATE="${temp_dir}/rollback.env"
 
 write_ssh_dropin 6900 prohibit-password no
 if grep -qE '^[[:space:]]*Port[[:space:]]+' "$SSH_DROPIN_FILE"; then
@@ -85,6 +87,7 @@ fi
 printf 'unchanged SSH port skip logic: OK\n'
 
 # 密钥配置取消后，不应继续询问端口或写入 SSH 策略。
+write_ssh_dropin 6900 prohibit-password yes
 command_exists() { return 0; }
 ssh_service_name() { :; }
 systemctl() { printf 'active\n'; }
