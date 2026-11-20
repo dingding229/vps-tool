@@ -309,7 +309,7 @@ confirm() {
     while true; do
         printf '%s?%s %s %s[Y/n]%s ' \
             "$C_YELLOW" "$C_RESET" "$prompt" "$C_DIM" "$C_RESET" >&2
-        read -r answer || return 1
+        read -r answer || return 2
         answer="${answer:-Y}"
         case "$answer" in
             Y|y) return 0 ;;

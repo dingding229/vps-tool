@@ -135,12 +135,12 @@ configure_ssh_interactive() {
     local port_changed=0 write_port="yes" rollback_firewall_kind="none"
     local skip_connection_test=0
     ui_subtitle "密钥认证"
-    target_user="$(prompt_value '配置密钥登录的用户' "${SUDO_USER:-root}")"
-    ensure_authorized_key "$target_user" "$CURRENT_SSH_PORT"
+    target_user="$(prompt_value '配置密钥登录的用户' "${SUDO_USER:-root}")" || return 1
+    ensure_authorized_key "$target_user" "$CURRENT_SSH_PORT" || return 1
 
     default_port="$(random_ssh_port)"
     while true; do
-        new_port="$(prompt_value '新的 SSH 端口' "$default_port")"
+        new_port="$(prompt_value '新的 SSH 端口' "$default_port")" || return 1
         validate_port "$new_port" || { log_warn "端口必须为 1-65535"; continue; }
         if [[ "$new_port" != "$CURRENT_SSH_PORT" ]] && ss -lntH 2>/dev/null | awk '{print $4}' | grep -Eq "(^|:)${new_port}$"; then
             log_warn "端口 ${new_port} 已被占用"

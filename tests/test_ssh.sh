@@ -83,3 +83,16 @@ if should_write_ssh_port 6900 6900 root; then
     exit 1
 fi
 printf 'unchanged SSH port skip logic: OK\n'
+
+# 密钥配置取消后，不应继续询问端口或写入 SSH 策略。
+command_exists() { return 0; }
+ssh_service_name() { :; }
+systemctl() { printf 'active\n'; }
+prompt_value() { printf '%s\n' "$1" >> "$temp_dir/prompts"; printf 'root\n'; }
+ensure_authorized_key() { return 1; }
+if configure_ssh_interactive >/dev/null; then
+    printf 'FAIL: cancelled key configuration should stop SSH setup\n'
+    exit 1
+fi
+[[ "$(cat "$temp_dir/prompts")" == '配置密钥登录的用户' ]]
+printf 'cancelled SSH key step stops port configuration: OK\n'

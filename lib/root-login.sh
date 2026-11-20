@@ -91,7 +91,7 @@ copy_sudo_user_keys_to_root() {
 
     confirm "是否复用当前用户 ${source_user} 的 SSH 公钥用于 root" "Y" || return 1
     resolve_target_user root
-    fix_authorized_keys_permissions
+    fix_authorized_keys_permissions || return 1
     while IFS= read -r line; do
         [[ -n "$line" ]] || continue
         if ! grep -qxF -- "$line" "$TARGET_AUTH_KEYS"; then
@@ -99,7 +99,7 @@ copy_sudo_user_keys_to_root() {
             copied=1
         fi
     done < <(awk '!/^[[:space:]]*(#|$)/ && $1 ~ /^(ssh-|ecdsa-|sk-)/' "$source_keys")
-    fix_authorized_keys_permissions
+    fix_authorized_keys_permissions || return 1
     if has_valid_authorized_key; then
         if (( copied == 1 )); then
             log_success "已将 ${source_user} 的公钥复制到 root"
@@ -113,7 +113,7 @@ copy_sudo_user_keys_to_root() {
 
 prepare_root_key_access() {
     resolve_target_user root
-    fix_authorized_keys_permissions
+    fix_authorized_keys_permissions || return 1
     if has_valid_authorized_key; then
         log_success "检测到 root 已有有效 SSH 公钥"
         ssh-keygen -lf "$TARGET_AUTH_KEYS" 2>/dev/null | sed 's/^/    /' || true

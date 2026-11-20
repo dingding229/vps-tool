@@ -22,7 +22,7 @@ main_menu() {
         ui_menu_item 1 "一键完成全部配置" "SSH + Fail2ban + vnStat + BBRv3"
 
         ui_menu_group "SSH 与登录"
-        ui_menu_item 2 "配置 SSH 安全策略" "密钥登录 / 修改端口"
+        ui_menu_item 2 "配置 SSH 安全策略" "密钥登录 / 密钥换新 / 修改端口"
         ui_menu_item 3 "启用 root SSH 登录" "默认仅密钥 / 可选密码"
         ui_menu_item 4 "执行 SSH 配置回滚" "恢复待确认的 SSH 配置"
 

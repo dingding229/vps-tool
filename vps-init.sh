@@ -32,6 +32,9 @@ cleanup_vps_tool_session() {
     cleanup_generated_private_key
 }
 trap cleanup_vps_tool_session EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 
 usage() {
