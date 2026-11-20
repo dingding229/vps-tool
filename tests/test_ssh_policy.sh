@@ -41,12 +41,18 @@ setup_config() {
 
 # 仅执行 sshd 的配置检查模式；服务、连接和自动回滚定时器由测试替代。
 simulate_older_parser=0
+simulate_legacy_root_alias=0
 sshd() {
     if [[ "$1" == '-t' && "$simulate_older_parser" == '1' && -f "$SSH_DROPIN_FILE" && -f "$TEMP_PASSWORD_CONFIG" ]]; then
         printf '%s line 4: "any" must appear alone in AuthenticationMethods\n' "$TEMP_PASSWORD_CONFIG" >&2
         return 255
     fi
-    command sshd -f "$SSHD_MAIN_CONFIG" "$@"
+    if [[ "$1" == '-T' && "$simulate_legacy_root_alias" == '1' ]]; then
+        command sshd -f "$SSHD_MAIN_CONFIG" "$@" \
+            | sed 's/^permitrootlogin prohibit-password$/permitrootlogin without-password/'
+    else
+        command sshd -f "$SSHD_MAIN_CONFIG" "$@"
+    fi
 }
 ss() { printf 'LISTEN 0 128 0.0.0.0:6900 0.0.0.0:*\n'; }
 flock() { :; }
@@ -234,9 +240,13 @@ printf 'Temporary password config conflict remains reversible until a new login 
 setup_config accepted-temp-conflict
 prepare_temp_password_config any
 test_login_ok=1
+simulate_legacy_root_alias=1
 configure_ssh_interactive > "$fixture/result" 2>&1
 [[ ! -e "$TEMP_PASSWORD_CONFIG" && ! -e "$SSH_ROLLBACK_STATE" ]]
+grep -Fqx 'permitrootlogin without-password' <<< "$(sshd -T -C 'user=root,host=localhost,addr=127.0.0.1')"
 verify_effective_ssh_config 6900 root prohibit-password
+simulate_legacy_root_alias=0
+printf 'Temporary password conflict resolves with legacy PermitRootLogin output: OK\n'
 
 setup_config extra-rules
 prepare_temp_password_config any

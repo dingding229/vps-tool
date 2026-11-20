@@ -27,12 +27,12 @@ root_login_shell() {
 }
 
 root_effective_config() {
-    sshd -T -C 'user=root,host=localhost,addr=127.0.0.1' 2>/dev/null
+    sshd -T -C 'user=root,host=localhost,addr=127.0.0.1' 2>/dev/null | ssh_normalize_effective_config
 }
 
 root_effective_setting() {
     local keyword="$1"
-    root_effective_config | awk -v key="$keyword" '$1==key {print $2; exit}'
+    root_effective_config | awk -v key="$keyword" '$1==key && !found {print $2; found=1}'
 }
 
 root_access_override_status() {

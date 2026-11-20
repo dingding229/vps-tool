@@ -43,6 +43,11 @@ unique_port_list() {
     awk 'NF && !seen[$1]++ {print $1}'
 }
 
+ssh_normalize_effective_config() {
+    # OpenSSH 可能在 -T 输出中使用同一策略的旧名称。
+    awk '$1 == "permitrootlogin" && $2 == "without-password" && NF == 2 {$2="prohibit-password"} {print}'
+}
+
 ssh_user_effective_config() {
     local user="$1" port="$2" client_ip local_ip host=localhost
     read -r client_ip _ local_ip _ <<< "${SSH_CONNECTION:-}"
@@ -52,7 +57,8 @@ ssh_user_effective_config() {
         client_ip=127.0.0.1
         local_ip=127.0.0.1
     fi
-    sshd -T -C "user=${user},host=${host},addr=${client_ip},laddr=${local_ip},lport=${port}" 2>/dev/null
+    sshd -T -C "user=${user},host=${host},addr=${client_ip},laddr=${local_ip},lport=${port}" 2>/dev/null \
+        | ssh_normalize_effective_config
 }
 
 ssh_key_only_login_is_effective() {

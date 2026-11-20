@@ -40,7 +40,7 @@ sshd() {
     done
     printf '%s\n' \
         'pubkeyauthentication yes' \
-        'passwordauthentication no' \
+        "passwordauthentication ${MOCK_PASSWORD_AUTH:-no}" \
         'kbdinteractiveauthentication no' \
         'authenticationmethods publickey' \
         "permitrootlogin ${MOCK_PERMIT_ROOT:-prohibit-password}"
@@ -49,6 +49,23 @@ sshd() {
 MOCK_PORTS='6900 6900'
 verify_effective_ssh_config 6900 root
 ssh_key_only_login_is_effective root
+
+MOCK_PERMIT_ROOT='without-password'
+verify_effective_ssh_config 6900 root prohibit-password
+ssh_key_only_login_is_effective root
+MOCK_PASSWORD_AUTH='yes'
+if verify_effective_ssh_config 6900 root prohibit-password >/dev/null; then
+    printf 'FAIL: legacy root policy spelling should not bypass password checks\n'
+    exit 1
+fi
+MOCK_PASSWORD_AUTH='no'
+for MOCK_PERMIT_ROOT in yes no forced-commands-only; do
+    if verify_effective_ssh_config 6900 root prohibit-password >/dev/null; then
+        printf 'FAIL: a different PermitRootLogin policy was accepted: %s\n' "$MOCK_PERMIT_ROOT"
+        exit 1
+    fi
+done
+printf 'PermitRootLogin alias preserves strict auth checks: OK\n'
 
 MOCK_PERMIT_ROOT='no'
 if ssh_key_only_login_is_effective root; then

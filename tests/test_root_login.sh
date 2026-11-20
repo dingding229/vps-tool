@@ -7,6 +7,7 @@ SCRIPT_DIR="$ROOT_DIR"
 source config/defaults.conf
 source lib/common.sh
 source lib/user.sh
+source lib/ssh.sh
 source lib/root-login.sh
 
 temp_dir="$(mktemp -d)"
@@ -45,6 +46,22 @@ PY
 )"
 [[ "$mode" == "640" ]]
 printf 'root include ordering and mode preservation: OK\n'
+
+(
+    sshd() {
+        if [[ "$1" == '-T' ]]; then
+            printf '%s\n' 'permitrootlogin without-password' 'passwordauthentication no' \
+                'pubkeyauthentication yes' 'kbdinteractiveauthentication no' 'authenticationmethods publickey'
+        fi
+    }
+    [[ "$(root_effective_setting permitrootlogin)" == 'prohibit-password' ]]
+    verify_root_access_config key
+    if verify_root_access_config password; then
+        printf 'FAIL: legacy key-only policy must not be treated as password mode\n'
+        exit 1
+    fi
+)
+printf 'root-only key mode accepts the legacy policy spelling: OK\n'
 
 # 如果本机提供 sshd，则验证最前置 Include 只覆盖 root，不改变普通用户认证策略。
 if command -v sshd >/dev/null 2>&1 && command -v ssh-keygen >/dev/null 2>&1; then
@@ -87,7 +104,7 @@ CONF
             -C "user=${user},host=localhost,addr=127.0.0.1"
     }
 
-    root_key="$(check_effective "${temp_dir}/root-key.conf" root)"
+    root_key="$(check_effective "${temp_dir}/root-key.conf" root | ssh_normalize_effective_config)"
     grep -q '^permitrootlogin prohibit-password$' <<< "$root_key"
     grep -q '^passwordauthentication no$' <<< "$root_key"
     grep -q '^authenticationmethods publickey$' <<< "$root_key"
