@@ -98,13 +98,12 @@ positions = [text.index(label) for label in labels]
 assert positions == sorted(positions)
 for phrase in ("第一" + "版", "测试" + "版", "安装或" + "修复"):
     assert phrase not in text
-line9 = next(line for line in text.splitlines() if "[9]" in line)
-line10 = next(line for line in text.splitlines() if "[10]" in line)
-line11 = next(line for line in text.splitlines() if "[11]" in line)
-line12 = next(line for line in text.splitlines() if "[12]" in line)
-assert line9.index("查看系统状态") == line10.index("检查系统配置")
-assert line10.index("检查系统配置") == line11.index("APT 软件包更新")
-assert line11.index("APT 软件包更新") == line12.index("检查 VPS Tool 更新")
+assert text.index("SSH 与登录") < text.index("更换 SSH 密钥") < text.index("访问防护")
+offsets = []
+for number, label in enumerate(("查看系统状态", "检查系统配置", "APT 软件包更新", "检查 VPS Tool 更新"), 10):
+    line = next(line for line in text.splitlines() if f"[{number}]" in line)
+    offsets.append(line.index(label))
+assert len(set(offsets)) == 1
 PY_MENU
 grep -q '执行 SSH 配置回滚' <<< "$main_menu_view"
 grep -q 'vnStat 流量中心' <<< "$main_menu_view"
@@ -112,6 +111,18 @@ grep -q '安全重启 / 开机自动恢复' <<< "$main_menu_view"
 grep -q 'APT 软件包更新' <<< "$main_menu_view"
 grep -q '检查 VPS Tool 更新' <<< "$main_menu_view"
 printf 'main menu grouping: OK\n'
+
+rotation_menu_view="$(
+    rotate_ssh_key_interactive() { printf 'standalone rotation called\n'; return 1; }
+    configure_ssh_interactive() { printf 'SSH policy editor called\n'; }
+    main_menu <<< $'3\n\n0' 2>/dev/null
+)"
+[[ "$(grep -cFx 'standalone rotation called' <<< "$rotation_menu_view")" == '1' ]]
+if grep -Fq 'SSH policy editor called' <<< "$rotation_menu_view"; then
+    printf 'FAIL: dedicated key rotation opened the SSH policy editor\n'
+    exit 1
+fi
+printf 'standalone SSH key rotation menu dispatch: OK\n'
 
 # 系统状态页按“环境 → APT → SSH → 防护 → 流量 → 网络 → 更新 → 文件”排列。
 show_preflight() { ui_section "$1" "运行环境"; }

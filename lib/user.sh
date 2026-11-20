@@ -37,6 +37,14 @@ has_valid_authorized_key() {
     ssh-keygen -lf "$TARGET_AUTH_KEYS" >/dev/null 2>&1
 }
 
+authorized_keys_are_plain() {
+    awk '
+        /^[[:space:]]*(#|$)/ {next}
+        $1 ~ /^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com)$/ && $2 ~ /^[A-Za-z0-9+\/=]+$/ {next}
+        {exit 1}
+    ' "$1"
+}
+
 validate_public_key_line() {
     local key="$1" tmp
     [[ "$key" =~ ^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)|sk-ssh-ed25519@openssh.com|sk-ecdsa-sha2-nistp256@openssh.com)[[:space:]]+[A-Za-z0-9+/=]+([[:space:]].*)?$ ]] || return 1
@@ -95,12 +103,16 @@ cleanup_generated_private_key() {
 }
 
 stage_generated_authorized_key() {
-    local state
+    local required_key_format="${1:-any}" state
     GENERATED_KEY_CONFIRMED=0
     GENERATED_KEYS_STATE="$(mktemp -d)" || return 1
     state="$GENERATED_KEYS_STATE"
-    cp -- "$TARGET_AUTH_KEYS" "$state/original" \
-        && awk '{print}' "$state/original" > "$state/staged" \
+    cp -- "$TARGET_AUTH_KEYS" "$state/original" || return 1
+    if [[ "$required_key_format" == "plain" ]] && ! authorized_keys_are_plain "$state/original"; then
+        log_warn "公钥文件含非标准授权条目，未更改现有授权"
+        return 1
+    fi
+    awk '{print}' "$state/original" > "$state/staged" \
         && printf '%s\n' "$GENERATED_PUBLIC_KEY_LINE" >> "$state/staged" \
         && replace_authorized_keys "$state/staged" "$state/original"
 }
@@ -130,7 +142,7 @@ show_generated_private_key() {
 
 
 generate_authorized_key() {
-    local current_port="${1:-22}" validation_mode="${2:-immediate}"
+    local current_port="${1:-22}" validation_mode="${2:-immediate}" required_key_format="${3:-any}"
     local key_name key_file group server_ip scp_host public_key
     local transfer_user transfer_home local_name verification_prompt
     key_name="vps-tool-${TARGET_USER}-$(beijing_compact)"
@@ -175,7 +187,7 @@ generate_authorized_key() {
         return 1
     fi
     GENERATED_PUBLIC_KEY_LINE="$public_key"
-    if ! stage_generated_authorized_key; then
+    if ! stage_generated_authorized_key "$required_key_format"; then
         cleanup_generated_private_key
         log_error "无法添加新公钥，未移除现有公钥"
         return 1

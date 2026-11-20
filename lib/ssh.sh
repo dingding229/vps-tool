@@ -118,6 +118,70 @@ verify_effective_ssh_config() {
     grep -qx 'pubkeyauthentication yes' <<< "$effective" || { log_error "PubkeyAuthentication 未生效"; return 1; }
 }
 
+ssh_key_rotation_port() {
+    local user="$1" ports port session_port
+    session_port="$(awk '{print $4; exit}' <<< "${SSH_CONNECTION:-}")"
+    if [[ "$session_port" =~ ^[1-9][0-9]{0,4}$ ]] && validate_port "$session_port"; then
+        printf '%s' "$session_port"
+        return
+    fi
+
+    ports="$(effective_ssh_ports "$user" | unique_port_list)" || return 1
+    [[ -n "$ports" ]] || return 1
+    if [[ "$ports" != *$'\n'* ]]; then
+        validate_port "$ports" || return 1
+        printf '%s' "$ports"
+        return
+    fi
+
+    while true; do
+        port="$(prompt_value "登录测试使用的现有端口（${ports//$'\n'/、}）" "${ports%%$'\n'*}")" || return 1
+        if grep -Fxq -- "$port" <<< "$ports" && validate_port "$port"; then
+            printf '%s' "$port"
+            return
+        fi
+        log_warn "请选择已配置的 SSH 端口" >&2
+    done
+}
+
+rotate_ssh_key_interactive() {
+    ui_header
+    ui_title "更换 SSH 密钥"
+    local required_cmd user port
+    for required_cmd in sshd ssh-keygen; do
+        command_exists "$required_cmd" || { log_error "缺少必要命令：${required_cmd}"; return 1; }
+    done
+
+    ui_section "01" "目标账户"
+    user="$(prompt_value '更换 SSH 密钥的用户' "${SUDO_USER:-root}")" || return 1
+    if ! id "$user" >/dev/null 2>&1; then
+        log_error "用户不存在：${user}"
+        return 1
+    fi
+    resolve_target_user "$user" || return 1
+    if [[ -L "${TARGET_HOME}/.ssh" || -L "$TARGET_AUTH_KEYS" || ! -f "$TARGET_AUTH_KEYS" ]] \
+        || ! has_valid_authorized_key; then
+        log_warn "未检测到可换新的公钥文件：${TARGET_AUTH_KEYS}"
+        return 1
+    fi
+    if ! authorized_keys_are_plain "$TARGET_AUTH_KEYS"; then
+        log_warn "公钥文件含限制选项或非标准授权条目，为保留现有访问限制，未执行换新"
+        return 1
+    fi
+
+    port="$(ssh_key_rotation_port "$user")" || { log_error "未能确定用于测试的 SSH 端口"; return 1; }
+    ui_kv "目标用户" "$user"
+    ui_kv "测试端口" "$port"
+    ui_kv "替换范围" "$TARGET_AUTH_KEYS"
+    log_info "只更换公钥，不修改 SSH 端口、登录策略或防火墙"
+    log_warn "请保持当前连接，确认能用新私钥登录后再移除旧公钥"
+    if ! confirm "是否生成新的 Ed25519 密钥"; then
+        log_info "已保留原有 SSH 密钥"
+        return 1
+    fi
+    generate_authorized_key "$port" rotate plain
+}
+
 configure_ssh_interactive() {
     ui_header
     ui_title "SSH 安全配置"
